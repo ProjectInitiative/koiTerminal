@@ -1,8 +1,8 @@
 # How to build koiTerminal
-Thanks to @zhuowei, koiTerminal can now be built with Android Studio for quicker development.
+Thanks to [@zhuowei](https://github.com/zhuowei), koiTerminal can now be built with Android Studio for quicker development.
 
-The manual releases will still be built with the OS to remain a soft fork of the upstream Linux Terminal app.
-But automatic releases will be built using the Android Studio setup by GitHub Actions.
+The manual releases will still be built with the OS so that koiTerminal remains a soft fork of the upstream Linux Terminal app.
+But automatic build artifacts will be built using the Android Studio setup by GitHub Actions (with a separate application ID + signature).
 
 # Android Studio build
 1. Install:
@@ -89,7 +89,7 @@ cd ../../..
 :gift: NEW: Then, the following changes are needed for a few rust dependencies:
 ```
 pushd external/rust/android-crates-io/crates/
-# Add fast-socks5 crate, and sync over (cargo_embargo generated) Android.bp. The commit bae2fc0 was used
+# Add fast-socks5 crate, and sync over (cargo_embargo generated) Android.bp. The commit bae2fc0 was used. Maybe acb8476 (v1.0.0) is more appropriate?
 git clone https://github.com/dizda/fast-socks5.git
 ln -s ../../../../../packages/modules/Virtualization/android/forwarder_host/fs5-Android-bp fast-socks5/Android.bp
 # Enable tokio-stream for apex com.android.virt. This should only add one line to the original Android.bp.

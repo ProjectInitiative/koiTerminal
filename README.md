@@ -1,5 +1,5 @@
 # koiTerminal
-A more permissive version of the Linux Terminal app with finer VM permission control, forked from the GrapheneOS repo, supporting custom virtual machine images (such as Secureblue). Currently in proof-of-concept stage. <!-- UPDATE -->
+A more permissive version of the Linux Terminal app with finer VM permission control, forked from the GrapheneOS repo, supporting custom virtual machine images (such as Secureblue). Currently in alpha stage. <!-- UPDATE -->
 
 > [!IMPORTANT]
 > For GrapheneOS users, new restrictions since around 2026070500 require additional `adb` permission grants. Please search the [How to use](#how-to-use) section for `hidden_api`.
@@ -80,7 +80,7 @@ These goals may change, and they may or may not be achievable. We will have to s
 - [X] Add support for One UI 8.5 on legacy branch
 - [X] Build-time signature verification for Secureblue
 - [X] Add support for port forwarding, shutdown, etc.
-- [X]  (stretch) Experimental: Enable forcing the VM to use the host vpn
+- [X] Experimental: Enable forcing the VM to use the host vpn
     - Supported by disabling network and including a managed SOCKS5 proxy
     - [X] Provide option to control network, SOCKS5, loopback, local network, etc.
 - [ ] Fix Secureblue image
@@ -88,9 +88,8 @@ These goals may change, and they may or may not be achievable. We will have to s
     - [ ] Add support for display.
     - [ ] Add support for file transfer.
 - [ ] FIXME for serial console
-    - [ ] Make pty changes work
+    - [X] Make pty changes work
     - [ ] Make mouse selection / middle button and keyboard Ctrl+Shift+C Ctrl+Insert etc. work in serial terminal
-    - [ ] Bug that deleting VM files confuses the app
 - [ ]  (stretch) Build 6.12 LTS vanilla kernel RPM package for Secureblue?
 - [ ] Implement a super-config system, including support for multiple `vm_config.json` files for different modes (install, update, use, isolated software, airgap...) or just different VMs.
     - put settings for `console_in`, `default_console` (ttyd/serial), `disposable`, `vm_config_path`, etc. there.
@@ -101,29 +100,20 @@ These goals may change, and they may or may not be achievable. We will have to s
     - Try passing file descriptors to avoid permission issues
 - [ ] FIXME for serial console
     - [ ] Find out which kernel versions and what configurations work. How about 6.6 LTS?
-- [ ]  (stretch) Enable forcing the VM to use the host vpn
-- [ ] Write a install guide inside the app
 - [ ] Support `images.zip` in addition to `images.tar.gz`
-- [X]  (stretch) Compile u-boot
-    - [ ] Boot from installation media using u-boot
 - [ ]  (stretch) Add back gutted features
     - Something to replace virtiofs (seamless file sharing)
     - Something to replace dynamic VM storage resizing
     - Make the display work
     - Make the mouse work (offset issue)
 - [ ] Support holding modifier keys (in ttyd too)
-- [ ]  (stretch) Enable forcing the VM to use the host vpn
 - [ ]  (stretch) WebUSB forwarding device to the VM
 - [ ]  (stretch) VM image for Windows guests (image subject to DMCA, but build scripts / conversion scripts should live)
 - [ ]  (stretch) VM image for Android guests
-
-Suggested by community:
-- Only applies to ttyd:
-    - [ ] Changing font size (MainActivity.kt#L251)
-
-Suggested by community, but either may not be easily done or Google is better suited to do it:
-- [ ] USB support
-- [ ] Custom fonts. Reference: https://github.com/tsl0922/ttyd/wiki/Serving-web-fonts (need to recompile ttyd)
+- [X]  (stretch) Compile u-boot
+    - [ ] Boot from installation media using u-boot
+- [ ]  (stretch) Changing ttyd font size (MainActivity.kt#L251)
+- [ ]  (stretch) Custom fonts. Reference: https://github.com/tsl0922/ttyd/wiki/Serving-web-fonts (need to recompile ttyd)
 
 # How to use
 If you are using Android 16 (such as One UI 8.5), you MUST install the legacy version of the app, and then read this section from the [legacy branch](https://github.com/outlawsanzhang/koiTerminal/tree/koiterminal-16#how-to-use).
@@ -153,6 +143,7 @@ adb shell "settings put global hidden_api_blacklist_exemptions 'Landroid/system/
 
 # Don't forget to turn off USB/wireless debugging (and probably developer options too) afterwards.
 ```
+Note that if you installed the GitHub Action auto-built apk, you need to replace `com.android.virtualization.koiterminal` with `com.android.virtualization.koiterminal.githubaction`.
 
 For One UI, the above should work too. If it does not, please open an issue.
 You can temporarily use the following alternative that grants ALL APPS a broad range of API usage,
