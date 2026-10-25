@@ -245,6 +245,11 @@
     <string name="settings_advanced_title">Advanced</string>
     <!-- Settings menu title for the VM config editor [CHAR LIMIT=none] -->
     <string name="settings_vm_config_title">VM config</string>
+    <!-- Long-press toasts for icon buttons [CHAR LIMIT=none] -->
+    <string name="terminal_toast_add_tab">New terminal tab (ttyd)</string>
+    <string name="terminal_toast_add_serial">New serial console tab</string>
+    <string name="terminal_toast_close_tab">Close this tab</string>
+    <string name="terminal_toast_settings">Settings</string>
     <!-- Auto-boot setting title/description [CHAR LIMIT=none] -->
     <string name="settings_auto_boot_title">Auto-boot VM</string>
     <string name="settings_auto_boot_desc">Start the VM automatically when the terminal opens</string>

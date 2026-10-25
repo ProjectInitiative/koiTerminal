@@ -18,7 +18,11 @@ package com.android.virtualization.koiterminal.new2.ui
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import android.view.KeyEvent
+import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +38,7 @@ import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -42,6 +47,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ripple
 import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
@@ -57,12 +63,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -82,6 +90,38 @@ import com.android.virtualization.koiterminal.new2.ui.main.TerminalViewModel
 import kotlinx.coroutines.flow.map
 
 val TAB_BAR_HEIGHT = 50.dp
+
+/**
+ * IconButton look-alike that shows a toast describing the action when
+ * long-pressed (for icon-only buttons whose meaning isn't obvious).
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ToastIconButton(
+    toastText: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val context = LocalContext.current
+    Box(
+        modifier =
+            modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = ripple(bounded = false),
+                    onClick = onClick,
+                    onLongClick = {
+                        Toast.makeText(context, toastText, Toast.LENGTH_SHORT).show()
+                    },
+                ),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+    }
+}
 
 @Composable
 fun TerminalTabBar(
@@ -134,7 +174,10 @@ fun TerminalTabBar(
                     )
                     if (index == tabs.lastIndex) {
                         Row(modifier = Modifier.padding(horizontal = 6.dp)) {
-                            IconButton(onClick = onAddTab) {
+                            ToastIconButton(
+                                toastText = stringResource(R.string.terminal_toast_add_tab),
+                                onClick = onAddTab,
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.Add,
                                     contentDescription =
@@ -142,7 +185,10 @@ fun TerminalTabBar(
                                     modifier = Modifier.size(24.dp),
                                 )
                             }
-                            IconButton(onClick = onAddSerialTab) {
+                            ToastIconButton(
+                                toastText = stringResource(R.string.terminal_toast_add_serial),
+                                onClick = onAddSerialTab,
+                            ) {
                                 Icon(
                                     painter = painterResource(R.drawable.ic_add_serial),
                                     contentDescription =
@@ -239,9 +285,9 @@ private fun TerminalTab(
                             )
                         },
             )
-            IconButton(
+            ToastIconButton(
+                toastText = stringResource(R.string.terminal_toast_close_tab),
                 onClick = { showCloseDialog = true },
-                modifier = Modifier.size(24.dp).padding(start = 4.dp),
             ) {
                 Icon(
                     imageVector = Icons.Default.Close,

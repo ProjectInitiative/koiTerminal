@@ -179,7 +179,8 @@ fun MainScreen(viewModel: MainViewModel) {
                                                 onAddSerialTab = { viewModel.addSerialTab() },
                                             )
                                         }
-                                        IconButton(
+                                        ToastIconButton(
+                                            toastText = stringResource(R.string.terminal_toast_settings),
                                             onClick = {
                                                 viewModel.setShowSettings(true)
                                                 viewModel.setIsImeVisible(false)
@@ -269,7 +270,8 @@ fun RunningScreen(state: MainUiState.Running, viewModel: MainViewModel) {
                     )
                 }
                 DisplayController(viewModel = viewModel)
-                IconButton(
+                ToastIconButton(
+                    toastText = stringResource(R.string.terminal_toast_settings),
                     onClick = {
                         viewModel.setShowSettings(true)
                         viewModel.setIsImeVisible(false)
