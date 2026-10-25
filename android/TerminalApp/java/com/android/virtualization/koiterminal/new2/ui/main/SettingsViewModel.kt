@@ -74,6 +74,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _shareTime = MutableStateFlow(shareTimePref(sharedPref))
     val shareTime: StateFlow<Boolean> = _shareTime.asStateFlow()
 
+    private val _autoBoot = MutableStateFlow(autoBootPref(sharedPref))
+    val autoBoot: StateFlow<Boolean> = _autoBoot.asStateFlow()
+
 
     private val sharedPrefListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -99,6 +102,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 }
                 KEY_SHARE_TIME -> {
                     _shareTime.value = shareTimePref(sharedPref)
+                }
+                KEY_AUTO_BOOT -> {
+                    _autoBoot.value = autoBootPref(sharedPref)
                 }
             }
         }
@@ -165,6 +171,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun setAutoBoot(enabled: Boolean) {
+        if (enabled != _autoBoot.value) {
+            sharedPref.edit().putBoolean(KEY_AUTO_BOOT, enabled).apply()
+            _autoBoot.value = enabled
+        }
+    }
+
     fun setShowKeepAwakeDialog(show: Boolean) {
         _showKeepAwakeDialog.value = show
     }
@@ -211,10 +224,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         internal const val KEY_SOCKS5_DELEGATE = "socks5_delegate"
         internal const val KEY_SOCKS5_LOOPBACK_OK = "socks5_loopback_ok"
         internal const val KEY_SHARE_TIME = "share_time"
+        internal const val KEY_AUTO_BOOT = "auto_boot"
         const val DEFAULT_SOCKS5_DELEGATED = 9050 // Orbot
         fun networkConnectionPref(sharedPref: SharedPreferences): NetworkConnection = NetworkConnection.valueOf(sharedPref.getString(KEY_NETWORK_CONNECTION, NetworkConnection.FULL.name)!!)
         fun socks5DelegatePref(sharedPref: SharedPreferences) = sharedPref.getInt(KEY_SOCKS5_DELEGATE, DEFAULT_SOCKS5_DELEGATED)
         fun socks5LoopbackOkPref(sharedPref: SharedPreferences) = sharedPref.getBoolean(KEY_SOCKS5_LOOPBACK_OK, false)
         fun shareTimePref(sharedPref: SharedPreferences) = sharedPref.getBoolean(KEY_SHARE_TIME, true)
+
+        fun autoBootPref(sharedPref: SharedPreferences) = sharedPref.getBoolean(KEY_AUTO_BOOT, false)
     }
 }

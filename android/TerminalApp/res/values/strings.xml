@@ -243,6 +243,11 @@
 
     <!-- Settings menu title for advanced options [CHAR LIMIT=none] -->
     <string name="settings_advanced_title">Advanced</string>
+    <!-- Settings menu title for the VM config editor [CHAR LIMIT=none] -->
+    <string name="settings_vm_config_title">VM config</string>
+    <!-- Auto-boot setting title/description [CHAR LIMIT=none] -->
+    <string name="settings_auto_boot_title">Auto-boot VM</string>
+    <string name="settings_auto_boot_desc">Start the VM automatically when the terminal opens</string>
     <!-- Settings menu title for memory size [CHAR LIMIT=none] -->
     <string name="settings_advanced_memory_title">Memory size</string>
     <!-- Settings menu memory size valid range error message [CHAR LIMIT=none] -->

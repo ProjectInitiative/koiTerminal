@@ -18,6 +18,7 @@ package com.android.virtualization.koiterminal.new2.ui.main
 import android.Manifest
 import android.app.Application
 import android.content.Intent
+import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.input.InputManager
 import android.os.ParcelFileDescriptor
@@ -32,6 +33,7 @@ import com.android.virtualization.koiterminal.new2.core.TerminalSession
 import com.android.virtualization.koiterminal.new2.core.TerminalSessionType
 import com.android.virtualization.koiterminal.new2.core.TerminalSessionRepository
 import com.android.virtualization.koiterminal.new2.core.VmController
+import com.android.virtualization.koiterminal.new2.ui.main.SettingsViewModel
 import com.android.virtualization.koiterminal.new2.core.VmState
 import com.android.virtualization.koiterminal.new2.ui.MainActivity
 import com.android.virtualization.koiterminal.new2.ui.PERMISSIONS
@@ -246,6 +248,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { VmController.start() }
     }
 
+    private fun isAutoBootEnabled(): Boolean {
+        val context = getApplication<Application>()
+        return context
+            .getSharedPreferences(SettingsViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(SettingsViewModel.KEY_AUTO_BOOT, false)
+    }
+
     fun onPermissionGranted() {
         refreshPermissionState()
         _permissionRequired.value = false
@@ -339,9 +348,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 TerminalSessionRepository.reset()
 
                                 // Once installed, start observing UI state and trigger VM startup
-                                // whenever it returns to a Ready state.
+                                // whenever it returns to a Ready state (only if auto-boot is
+                                // enabled in Settings; otherwise the user presses Start).
                                 uiState.collect { state ->
-                                    if (state is MainUiState.Ready) {
+                                    if (state is MainUiState.Ready && isAutoBootEnabled()) {
                                         startVm()
                                     }
                                 }

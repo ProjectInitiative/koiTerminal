@@ -56,7 +56,9 @@ import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.DisplaySettings
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.MoreTime
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.NearbyError
 import androidx.compose.material.icons.filled.NearbyOff
 import androidx.compose.material.icons.filled.OfflineBolt
@@ -139,6 +141,7 @@ enum class SettingsDestination(val title: Int, val icon: ImageVector) {
     PortControl(R.string.settings_port_title, Icons.Default.Security),
     Network(R.string.settings_network_title, Icons.Default.SettingsEthernet),
     Advanced(R.string.settings_advanced_title, Icons.Default.Tune),
+    VMConfig(R.string.settings_vm_config_title, Icons.Default.Code),
     Recovery(R.string.settings_recovery_title, Icons.Default.Restore),
 }
 
@@ -322,6 +325,7 @@ fun SettingsDetailPane(
                 SettingsDestination.PortControl -> PortControlPage()
                 SettingsDestination.Network -> NetworkPage(onCloseSettings)
                 SettingsDestination.Advanced -> AdvancedPage(onCloseSettings)
+                SettingsDestination.VMConfig -> VmConfigEditorPage(onCloseSettings)
                 SettingsDestination.Recovery -> RecoveryPage()
             }
         }
@@ -659,6 +663,7 @@ fun AdvancedPage(
     val showKeepAwakeDialog by settingsViewModel.showKeepAwakeDialog.collectAsStateWithLifecycle()
 
     val shareTime by settingsViewModel.shareTime.collectAsStateWithLifecycle()
+    val autoBoot by settingsViewModel.autoBoot.collectAsStateWithLifecycle()
 
     val typeToName =
         mapOf(
@@ -845,6 +850,27 @@ fun AdvancedPage(
                     role = Role.Switch,
                 ) { share ->
                     settingsViewModel.setShareTime(share)
+                },
+            )
+            HorizontalDivider()
+        }
+        item {
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_auto_boot_title)) },
+                supportingContent = {
+                    Text(stringResource(R.string.settings_auto_boot_desc))
+                },
+                leadingContent = {
+                    Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null)
+                },
+                trailingContent = {
+                    Switch(checked = autoBoot, onCheckedChange = null)
+                },
+                modifier = Modifier.toggleable(
+                    value = autoBoot,
+                    role = Role.Switch,
+                ) { enabled ->
+                    settingsViewModel.setAutoBoot(enabled)
                 },
             )
             HorizontalDivider()

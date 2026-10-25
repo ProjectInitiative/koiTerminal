@@ -64,6 +64,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.android.virtualization.koiterminal.BetterBugLauncher
 import com.android.virtualization.koiterminal.R
 import com.android.virtualization.koiterminal.new2.core.InstallState
@@ -71,6 +72,7 @@ import com.android.virtualization.koiterminal.new2.core.Installer
 import com.android.virtualization.koiterminal.new2.ui.main.DisplayState
 import com.android.virtualization.koiterminal.new2.ui.main.MainUiState
 import com.android.virtualization.koiterminal.new2.ui.main.MainViewModel
+import com.android.virtualization.koiterminal.new2.ui.main.SettingsViewModel
 import kotlinx.coroutines.delay
 
 @Composable
@@ -82,6 +84,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val showIfError by viewModel.showIfError.collectAsStateWithLifecycle()
     val isFullscreen by viewModel.isFullscreen.collectAsStateWithLifecycle()
     val hasMandatoryPermissions by viewModel.hasMandatoryPermissions.collectAsStateWithLifecycle()
+    val settingsViewModel: SettingsViewModel = viewModel()
 
     var lastValidState by remember { mutableStateOf<MainUiState>(MainUiState.Ready) }
     if (uiState !is MainUiState.Error) {
@@ -139,13 +142,34 @@ fun MainScreen(viewModel: MainViewModel) {
                 } else
                     when (val state = lastValidState) {
                         is MainUiState.Ready -> {
-                            // VM will soon be booting
-                            LaunchedEffect(lastValidState) {
-                                // ... unless it is stuck
-                                delay(2000)
-                                if (uiState is MainUiState.Ready) {
-                                    Log.d("MainScreen", "UI stuck in MainUiState.Ready for 2 seconds. Reinitializing Installer.")
-                                    Installer.initialize(context)
+                            val autoBoot by settingsViewModel.autoBoot.collectAsStateWithLifecycle()
+                            if (autoBoot) {
+                                // VM will soon be booting
+                                LaunchedEffect(lastValidState) {
+                                    // ... unless it is stuck
+                                    delay(2000)
+                                    if (uiState is MainUiState.Ready) {
+                                        Log.d("MainScreen", "UI stuck in MainUiState.Ready for 2 seconds. Reinitializing Installer.")
+                                        Installer.initialize(context)
+                                    }
+                                }
+                            } else {
+                                // Auto-boot disabled in Settings: rest state until the
+                                // user presses Start.
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Button(onClick = { viewModel.startVm() }) {
+                                            Text("Start VM")
+                                        }
+                                        Text(
+                                            text = "Auto-boot is disabled (Settings → Advanced)",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            modifier = Modifier.padding(top = 8.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
