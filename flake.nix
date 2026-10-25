@@ -56,7 +56,10 @@
       # AndroidStudioProject/app/build.gradle.kts). The OS/Soong build uses
       # com.android.virtualization.koiterminal instead.
       appId = "com.android.virtualization.koiterminal.githubaction";
-      mainActivity = "${appId}/.MainActivity";
+      # Activity classes are relative to the manifest namespace
+      # (com.android.virtualization.koiterminal), NOT the applicationId.
+      # .LauncherActivity is the MAIN/LAUNCHER entry (manifest line ~49).
+      mainActivity = "${appId}/com.android.virtualization.koiterminal.LauncherActivity";
       buildToolsVer = "36.0.0";
       sdkApiMajor = "37";
       # Directory name android-nixpkgs installs the API 37 platform under.
