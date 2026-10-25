@@ -270,6 +270,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         VmController.stop()
     }
 
+    /**
+     * Called when the VM has stopped and the UI should return to the manager
+     * (idle) screen instead of closing the app. Clears terminal sessions and
+     * transitions back to Ready so the Start button is shown again.
+     */
+    fun onVmStopped() {
+        Log.i("MainViewModel", "MainViewModel.onVmStopped()")
+        hasVmEverStarted = false
+        TerminalSessionRepository.reset()
+        VmController.reset()
+    }
+
     fun restartVm() {
         Log.i("MainViewModel", "MainViewModel.restartVm()")
         hasVmEverStarted = false
@@ -369,6 +381,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         VmController.vmState.collect { state ->
                             if (state is VmState.Rebooting) {
                                 restartVm()
+                                // A guest-initiated reboot should bring the VM back up
+                                // regardless of the auto-boot setting.
+                                startVm()
                             } else if (state is VmState.Running && state.outReadingPfd != null && state.inWritingPfd != null && state.terminalAddress == null) {
                                 // When serial is ready but ttyd is not, try to add serial tab and then close current (ttyd) tab
                                 val currentTabId = TerminalSessionRepository.selectedSessionId.value

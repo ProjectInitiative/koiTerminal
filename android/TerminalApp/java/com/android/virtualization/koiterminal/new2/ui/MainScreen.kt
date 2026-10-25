@@ -102,7 +102,11 @@ fun MainScreen(viewModel: MainViewModel) {
             is MainUiState.Ready -> {
                 snackbarHostState.currentSnackbarData?.dismiss()
             }
-            is MainUiState.Stopped -> activity.finish()
+            is MainUiState.Stopped -> {
+                // Return to the manager (idle) screen instead of closing the app;
+                // the VM can be started again from there.
+                viewModel.onVmStopped()
+            }
             is MainUiState.Error -> {
                 handleError(activity, snackbarHostState, state.handler) {
                     viewModel.setShowIfError(true)
