@@ -155,20 +155,52 @@ fun MainScreen(viewModel: MainViewModel) {
                                 }
                             } else {
                                 // Auto-boot disabled in Settings: rest state until the
-                                // user presses Start.
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Button(onClick = { viewModel.startVm() }) {
-                                            Text("Start VM")
+                                // user presses Start. Render the same chrome as the running
+                                // screen (tab bar + settings) so settings stay reachable.
+                                val idleTabs by viewModel.tabs.collectAsStateWithLifecycle()
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier =
+                                            Modifier.fillMaxWidth()
+                                                .background(MaterialTheme.colorScheme.surface),
+                                    ) {
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            TerminalTabBar(
+                                                tabs = idleTabs,
+                                                selectedTabId = null,
+                                                onTabSelected = { viewModel.selectTab(it) },
+                                                onTabClosed = { viewModel.closeTab(it) },
+                                                onAddTab = { viewModel.addTab() },
+                                                onAddSerialTab = { viewModel.addSerialTab() },
+                                            )
                                         }
-                                        Text(
-                                            text = "Auto-boot is disabled (Settings → Advanced)",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            modifier = Modifier.padding(top = 8.dp),
-                                        )
+                                        IconButton(
+                                            onClick = {
+                                                viewModel.setShowSettings(true)
+                                                viewModel.setIsImeVisible(false)
+                                            }
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Settings,
+                                                contentDescription = "Settings",
+                                            )
+                                        }
+                                    }
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Button(onClick = { viewModel.startVm() }) {
+                                                Text("Start VM")
+                                            }
+                                            Text(
+                                                text = "Auto-boot is disabled (Settings → Advanced)",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                modifier = Modifier.padding(top = 8.dp),
+                                            )
+                                        }
                                     }
                                 }
                             }
