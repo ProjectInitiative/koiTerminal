@@ -59,12 +59,17 @@ public class InstalledImage private constructor(val installDir: Path) {
             private val PATTERN = """^(.*?)-(\d+)-(.*)$""".toRegex()
             private val PATTERN_CUSTOM = """^(\d+) (\d+)$""".toRegex()
 
-            // Matches: "Fri Nov 28 04:09:48 UTC 2025"
+            // Matches: "Fri Nov 28 04:09:48 UTC 2025" and date(1)-style
+            // "Fri May  8 13:25:25 UTC 2026" (single-digit day, extra spaces).
             private val DATE_FORMATTER =
-                DateTimeFormatter.ofPattern("EEE MMM dd HH:mm:ss z yyyy", Locale.US)
+                DateTimeFormatter.ofPattern("EEE MMM d HH:mm:ss z yyyy", Locale.US)
 
             fun parse(input: String): BuildInfo {
-                val match = PATTERN.find(input)
+                // Normalize whitespace: date(1) pads single-digit days with an
+                // extra space ("May  8"), which breaks both the regex splitting
+                // and DateTimeFormatter (index-of-parse errors otherwise).
+                val normalized = input.replace(Regex("\\s+"), " ")
+                val match = PATTERN.find(normalized)
                 if (match == null) {
                     // For outdated custom images
                     val match = PATTERN_CUSTOM.find(input)
