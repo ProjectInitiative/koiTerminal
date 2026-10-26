@@ -108,6 +108,8 @@ fun MainScreen(viewModel: MainViewModel) {
     val hasVmSlots = vmEntries.isNotEmpty() || vmInstallStates.isNotEmpty() || installState is InstallState.Installed
     // VM whose vm_config.json is being edited (from a VM card's overflow menu).
     var editingVmId by remember { mutableStateOf<String?>(null) }
+    // VM whose per-VM settings are being edited (from a VM card's overflow menu).
+    var settingsVmId by remember { mutableStateOf<String?>(null) }
 
     PermissionChecker(viewModel, snackbarHostState)
 
@@ -227,6 +229,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                                 onStartVm = { viewModel.startVm(it) },
                                                 onStopVm = { viewModel.stopVm(it) },
                                                 onEditConfig = { editingVmId = it },
+                                                onSettings = { settingsVmId = it },
                                                 onChanged = refreshVmEntries,
                                             )
                                             for ((vmId, vmInstallState) in vmInstallStates) {
@@ -287,6 +290,24 @@ fun MainScreen(viewModel: MainViewModel) {
                         VmConfigEditorPage(
                             vmId = vmId,
                             onCloseSettings = { editingVmId = null },
+                        )
+                    }
+                }
+            }
+
+            // Per-VM settings (memory/network/socks5/ports/graphics; VM card
+            // overflow → "Settings"), persisted via VmSettings (Phase 5).
+            settingsVmId?.let { vmId ->
+                key(vmId) {
+                    Box(
+                        modifier =
+                            Modifier.fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background)
+                                .safeDrawingPadding()
+                    ) {
+                        VmSettingsPage(
+                            vmId = vmId,
+                            onClose = { settingsVmId = null },
                         )
                     }
                 }

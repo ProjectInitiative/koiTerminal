@@ -8,7 +8,7 @@ Full architecture + contracts: **docs/MULTI_VM_PLAN.md** (read it first).
 - [x] Phase B — VmManager (`VmInstance`, per-vmId state flows, VmService scoping)
 - [x] Phase C — import & installer (SAF import dialog, `ImageArchive.fromPath`, install queue)
 - [x] Phase D — UI (VM list idle screen, per-VM tabs, per-VM config editor)
-- [ ] Phase E — settings split (per-VM JSON prefs, global trim)
+- [x] Phase E — settings split (per-VM JSON prefs, global trim)
 
 Rules: implement only your assigned phase; the build gate
 (`nix develop .# -c bash -c "build-android"`) must pass before committing;

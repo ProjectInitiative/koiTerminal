@@ -55,6 +55,7 @@ import com.android.virtualization.koiterminal.new2.core.TerminalSessionRepositor
 import com.android.virtualization.koiterminal.new2.core.VmEntry
 import com.android.virtualization.koiterminal.new2.core.VmManager
 import com.android.virtualization.koiterminal.new2.core.VmRegistry
+import com.android.virtualization.koiterminal.new2.core.VmSettings
 import com.android.virtualization.koiterminal.new2.core.VmState
 
 /**
@@ -72,6 +73,7 @@ fun VmListContent(
     onStartVm: (String) -> Unit,
     onStopVm: (String) -> Unit,
     onEditConfig: (String) -> Unit,
+    onSettings: (String) -> Unit,
     onChanged: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -99,6 +101,7 @@ fun VmListContent(
                 onStartVm = onStartVm,
                 onStopVm = onStopVm,
                 onEditConfig = onEditConfig,
+                onSettings = onSettings,
                 onRename = { renameTarget = entry },
                 onUninstall = { uninstallTarget = entry },
             )
@@ -134,6 +137,7 @@ fun VmListContent(
                     TerminalSessionRepository.removeSessionsForVm(target.id)
                     Installer.cancelVmInstall(target.id)
                     VmRegistry.remove(context, target.id)
+                    VmSettings.delete(context, target.id)
                     Installer.clearVmInstallState(target.id)
                 } catch (e: Exception) {
                     Toast.makeText(context, "Uninstall failed: ${e.message}", Toast.LENGTH_SHORT)
@@ -157,6 +161,7 @@ private fun VmCard(
     onStartVm: (String) -> Unit,
     onStopVm: (String) -> Unit,
     onEditConfig: (String) -> Unit,
+    onSettings: (String) -> Unit,
     onRename: () -> Unit,
     onUninstall: () -> Unit,
 ) {
@@ -205,6 +210,13 @@ private fun VmCard(
                         onClick = {
                             menuOpen = false
                             onEditConfig(entry.id)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Settings") },
+                        onClick = {
+                            menuOpen = false
+                            onSettings(entry.id)
                         },
                     )
                     DropdownMenuItem(

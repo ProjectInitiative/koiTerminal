@@ -47,32 +47,16 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.AddToHomeScreen
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.AddToHomeScreen
-import androidx.compose.material.icons.filled.AppBlocking
-import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.DisplaySettings
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.MoreTime
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.NearbyError
-import androidx.compose.material.icons.filled.NearbyOff
-import androidx.compose.material.icons.filled.OfflineBolt
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.Power
-import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.SettingsEthernet
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.VpnKey
-import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -120,13 +104,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.android.virtualization.koiterminal.GraphicsManager
 import com.android.virtualization.koiterminal.R
 import com.android.virtualization.koiterminal.new2.core.OpenPort
-import com.android.virtualization.koiterminal.new2.core.VmController
+import com.android.virtualization.koiterminal.new2.core.VmManager
+import com.android.virtualization.koiterminal.new2.core.VmSettings
 import com.android.virtualization.koiterminal.new2.ui.main.DisplayResolution
 import com.android.virtualization.koiterminal.new2.ui.main.MainViewModel
-import com.android.virtualization.koiterminal.new2.ui.main.NetworkConnection
 import com.android.virtualization.koiterminal.new2.ui.main.SettingsViewModel
 import java.math.RoundingMode
 import java.util.Locale
@@ -135,11 +118,14 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
-val NETWORK_LIMITATION_LINK_URL = "https://github.com/outlawsanzhang/koiTerminal/blob/koiterminal/FAQ.md#network-settings-limitations"
-
+/**
+ * Global settings destinations. Port forwarding (PortControl) and network
+ * connection moved into the per-VM settings surface (multi-VM plan Phase 5);
+ * PortControl remains reachable via the port-notification deep link and then
+ * shows the active VM's ports.
+ */
 enum class SettingsDestination(val title: Int, val icon: ImageVector) {
     PortControl(R.string.settings_port_title, Icons.Default.Security),
-    Network(R.string.settings_network_title, Icons.Default.SettingsEthernet),
     Advanced(R.string.settings_advanced_title, Icons.Default.Tune),
     VMConfig(R.string.settings_vm_config_title, Icons.Default.Code),
     Recovery(R.string.settings_recovery_title, Icons.Default.Restore),
@@ -163,23 +149,6 @@ enum class KeepAwakeDuration(val minutes: Int, val stringRes: Int) {
     }
 }
 
-enum class NetworkConnectionOptions(val icon: ImageVector, val titleRes: Int, val descRes: Int) {
-    NONE(Icons.Default.OfflineBolt, R.string.settings_network_none, R.string.settings_network_none_desc),
-    FULL(Icons.Default.Public, R.string.settings_network_full, R.string.settings_network_full_desc),
-    MANAGED_SOCKS5(Icons.Default.VpnKey, R.string.settings_network_managed_socks5, R.string.settings_network_managed_socks5_desc),
-    DELEGATE_SOCKS5(Icons.Default.Directions, R.string.settings_network_delegate_socks5, R.string.settings_network_delegate_socks5_desc);
-
-    fun toSetting(): NetworkConnection {
-        return NetworkConnection.valueOf(name)
-    }
-
-    companion object {
-        fun fromSetting(connection: NetworkConnection): NetworkConnectionOptions {
-            return NetworkConnectionOptions.valueOf(connection.name)
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
 fun SettingsScreen(onBack: () -> Unit, viewModel: MainViewModel = viewModel()) {
@@ -190,7 +159,14 @@ fun SettingsScreen(onBack: () -> Unit, viewModel: MainViewModel = viewModel()) {
     val settingsRequest by viewModel.settingsRequest.collectAsStateWithLifecycle()
     val settingsViewModel: SettingsViewModel = viewModel()
 
-    val destinations = remember { SettingsDestination.values().toList() }
+    val destinations =
+        remember {
+            listOf(
+                SettingsDestination.Advanced,
+                SettingsDestination.VMConfig,
+                SettingsDestination.Recovery,
+            )
+        }
 
     LaunchedEffect(settingsRequest, isMobileMode) {
         if (settingsRequest != null) {
@@ -322,8 +298,7 @@ fun SettingsDetailPane(
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
             when (destination) {
-                SettingsDestination.PortControl -> PortControlPage()
-                SettingsDestination.Network -> NetworkPage(onCloseSettings)
+                SettingsDestination.PortControl -> PortControlPage(vmId = null) // deep link: active VM
                 SettingsDestination.Advanced -> AdvancedPage(onCloseSettings)
                 SettingsDestination.VMConfig -> VmConfigEditorPage(vmId = null, onCloseSettings = onCloseSettings)
                 SettingsDestination.Recovery -> RecoveryPage()
@@ -342,320 +317,17 @@ fun intentLaunchAppSettings(activity: Activity): Intent {
     }
 }
 
-@Composable
-fun NetworkPage(
-    onCloseSettings: () -> Unit,
-    mainViewModel: MainViewModel = viewModel(),
-    settingsViewModel: SettingsViewModel = viewModel(),
-) {
-    val activity = LocalContext.current as Activity
-    val currentNetwork by settingsViewModel.networkConnection.collectAsStateWithLifecycle()
-    val currentNetworkOption = NetworkConnectionOptions.fromSetting(currentNetwork)
-    val socks5Delegate by settingsViewModel.socks5Delegate.collectAsStateWithLifecycle()
-    var localPermission by remember { mutableStateOf(checkLocalPermission(activity)) }
-    localPermission = checkLocalPermission(activity)
-    val socks5LoopbackOk by settingsViewModel.socks5LoopbackOk.collectAsStateWithLifecycle()
-    var showNetworkSelectionDialog by remember { mutableStateOf(false) }
-    var showDelegatePortDialog by remember { mutableStateOf(false) }
-    var showRebootDialog by remember { mutableStateOf(0) }
-    var delegatePort by remember { mutableStateOf<String>(socks5Delegate.toString()) }
-    var portErrorResId by remember { mutableStateOf<Int?>(null) }
-    val settingsLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            localPermission = checkLocalPermission(activity)
-        }
-    val localPermissionLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-            localPermission = checkLocalPermission(activity)
-            if (!localPermission) {
-                settingsLauncher.launch(intentLaunchAppSettings(activity))
-            }
-        }
-
-
-    if (showNetworkSelectionDialog) {
-        NetworkSelectionDialog(
-            currentSelection = currentNetworkOption,
-            onDismissRequest = { showNetworkSelectionDialog = false },
-            onConfirm = { option ->
-                settingsViewModel.setNetworkConnection(option.toSetting())
-                showNetworkSelectionDialog = false
-                showRebootDialog = 1
-            },
-        )
-    }
-    if (showDelegatePortDialog) {
-        AlertDialog(
-            onDismissRequest = { showDelegatePortDialog = false },
-            title = { Text(stringResource(R.string.settings_delegating_port_dlg_title)) },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = delegatePort,
-                        onValueChange = { it ->
-                            delegatePort = it
-                            portErrorResId = null
-                        },
-                        label = { Text(stringResource(R.string.settings_port_dlg_hint_port_number)) },
-                        isError = portErrorResId != null,
-                        supportingText = portErrorResId?.let { { Text(stringResource(it)) } },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val port = delegatePort.toIntOrNull()
-                        if (port == null) {
-                            portErrorResId = R.string.settings_port_dlg_error_invalid_input
-                        } else if (port < 1024 || port > 65535) {
-                            portErrorResId = R.string.settings_port_dlg_error_invalid_range
-                        } else {
-                            showDelegatePortDialog = false
-                            if (socks5Delegate != port) {
-                                settingsViewModel.setSocks5Delegate(port)
-                                showRebootDialog = 1
-                            }
-                        }
-                    }
-                ) {
-                    Text(stringResource(R.string.settings_port_dlg_btn_save))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDelegatePortDialog = false }) {
-                    Text(stringResource(R.string.settings_port_dlg_btn_cancel))
-                }
-            },
-        )
-    }
-
-    if (showRebootDialog != 0) {
-        AlertDialog(
-            onDismissRequest = { showRebootDialog = 0 },
-            title = { Text(stringResource(R.string.settings_graphics_dlg_title_restart)) },
-            text = { Text(stringResource(R.string.settings_graphics_dlg_message_restart)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        when (showRebootDialog) {
-                            1 -> {
-                                showRebootDialog = 0
-                                mainViewModel.restartVm()
-                                onCloseSettings()
-                            }
-                            else -> { // force shut down app
-                                showRebootDialog = 0
-                                mainViewModel.stopVm()
-                                onCloseSettings()
-                            }
-                        }
-                    }
-                ) {
-                    Text(stringResource(R.string.settings_graphics_dlg_btn_restart))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRebootDialog = 0 }) {
-                    Text(stringResource(R.string.settings_graphics_dlg_btn_later))
-                }
-            },
-        )
-    }
-
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        item {
-            ListItem(
-                headlineContent = {
-                    Text(stringResource(currentNetworkOption.titleRes))
-                },
-                supportingContent = {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(currentNetworkOption.descRes))
-                    }
-                },
-                leadingContent = { Icon(imageVector = currentNetworkOption.icon, contentDescription = null) },
-                trailingContent = {
-                    Icon(imageVector = Icons.Default.ExpandMore, contentDescription = null)
-                },
-                modifier = Modifier.clickable { showNetworkSelectionDialog = true },
-            ) 
-        }
-        item {
-            ListItem(
-                headlineContent = {
-                    Text(stringResource(R.string.settings_network_open_limitations))
-                },
-                leadingContent = { Icon(imageVector = Icons.Default.WarningAmber, contentDescription = null) },
-                trailingContent = {
-                    Icon(imageVector = Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
-                },
-                modifier = Modifier.clickable {
-                    // Using Sharesheet
-                    val sendIntent: Intent = Intent().apply {
-                        action = Intent.ACTION_SEND
-                        putExtra(Intent.EXTRA_TEXT, NETWORK_LIMITATION_LINK_URL)
-                        type = "text/plain"
-                    }
-                    val shareIntent = Intent.createChooser(sendIntent, null)
-                    activity.startActivity(shareIntent)
-                },
-            ) 
-        }
-        when (currentNetwork) {
-            NetworkConnection.MANAGED_SOCKS5 -> {
-                item {
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.settings_socks5_connections)) },
-                    )
-                }
-                item {
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.settings_socks5_local_ok)) },
-                        supportingContent = { Text(stringResource(R.string.settings_socks5_local_ok_desc)) },
-                        leadingContent = {
-                            Icon(imageVector = Icons.Default.NearbyError, contentDescription = null)
-                        },
-                        trailingContent = {
-                            Switch(checked = localPermission, onCheckedChange = null)
-                        },
-                        modifier = Modifier.toggleable(
-                            value = localPermission,
-                            role = Role.Switch,
-                        ) { ok ->
-                            if (ok) {
-                                // Ask for permission
-                                localPermissionLauncher.launch(android.Manifest.permission.ACCESS_LOCAL_NETWORK)
-                            } else {
-                                // Somehow, this does not fully revoke the permission. Must direct the user to do so
-                                // Are there more permissions in android.Manifest.permission_group.NEARBY_DEVICES? We don't request any.
-                                // activity.revokeSelfPermissionOnKill(android.Manifest.permission.ACCESS_LOCAL_NETWORK)
-                                // showRebootDialog = 2 // force shut down app
-                                settingsLauncher.launch(intentLaunchAppSettings(activity))
-                            }
-                        },
-                    )
-                }
-                item {
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.settings_socks5_loopback_ok)) },
-                        supportingContent = { Text(stringResource(R.string.settings_socks5_loopback_ok_desc)) },
-                        leadingContent = {
-                            Icon(imageVector = Icons.AutoMirrored.Filled.AddToHomeScreen, contentDescription = null)
-                        },
-                        trailingContent = {
-                            Switch(checked = socks5LoopbackOk, onCheckedChange = null)
-                        },
-                        modifier = Modifier.toggleable(
-                            value = socks5LoopbackOk,
-                            role = Role.Switch,
-                        ) { ok ->
-                            settingsViewModel.setSocks5LoopbackOk(ok)
-                            showRebootDialog = 1
-                        },
-                    )
-                }
-            }
-            NetworkConnection.DELEGATE_SOCKS5 -> {
-                item {
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.settings_socks5_delegated_port)) },
-                        supportingContent = { Text(socks5Delegate.toString()) },
-                        leadingContent = {
-                            Icon(imageVector = Icons.Default.Pin, contentDescription = null)
-                        },
-                        modifier =
-                            Modifier.clickable {
-                                showDelegatePortDialog = true
-                            },
-                    )
-                }
-            }
-            else -> {}
-        }
-        item {
-            HorizontalDivider()
-        }
-    }
-}
-
-@Composable
-fun NetworkSelectionDialog(
-    currentSelection: NetworkConnectionOptions,
-    onDismissRequest: () -> Unit,
-    onConfirm: (NetworkConnectionOptions) -> Unit,
-) {
-    var selected by remember { mutableStateOf(currentSelection) }
-    AlertDialog(
-        onDismissRequest = onDismissRequest,
-        title = { Text(stringResource(R.string.settings_network_title)) },
-        text = {
-            Column(Modifier.selectableGroup()) {
-                NetworkConnectionOptions.entries.forEachIndexed { index, option ->
-                    val isSelected = option == selected
-                    Row(
-                        Modifier.fillMaxWidth()
-                            .height(64.dp)
-                            .selectable(
-                                selected = isSelected,
-                                onClick = { selected = option },
-                                role = Role.RadioButton,
-                            )
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = isSelected, onClick = null)
-                        // Icon(option.icon, contentDescription = null) // too ugly and cramped
-                        Column(modifier = Modifier.padding(start = 16.dp)) {
-                            Text(
-                                text = stringResource(option.titleRes),
-                                style = MaterialTheme.typography.bodyLarge,
-                            )
-                            Text(
-                                text = stringResource(option.descRes),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.secondary,
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                if (selected != currentSelection) {
-                    onConfirm(selected)
-                } else {
-                    onDismissRequest()
-                }
-            }) {
-                Text(stringResource(android.R.string.ok))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismissRequest) {
-                Text(stringResource(android.R.string.cancel))
-            }
-        },
-    )
-}
-
+/**
+ * Global settings that apply app-wide (multi-VM plan Phase 5): display
+ * resolution, keep-awake, share-time and auto-boot. Memory, network, socks5,
+ * ports and graphics acceleration live in the per-VM settings surface
+ * (VmSettingsPage).
+ */
 @Composable
 fun AdvancedPage(
     onCloseSettings: () -> Unit,
-    mainViewModel: MainViewModel = viewModel(),
     settingsViewModel: SettingsViewModel = viewModel(),
 ) {
-    val currentType = VmController.graphicsAccelerationType
-    var showSelectionDialog by remember { mutableStateOf(false) }
-    var showRebootDialog by remember { mutableStateOf(false) }
-    var selectedType by remember { mutableStateOf(currentType) }
-
-    val currentMemoryMb by settingsViewModel.currentMemoryMb.collectAsStateWithLifecycle()
-    var showMemoryDialog by remember { mutableStateOf(false) }
-
     val displayResolution by settingsViewModel.displayResolution.collectAsStateWithLifecycle()
     var showResolutionDialog by remember { mutableStateOf(false) }
 
@@ -664,77 +336,6 @@ fun AdvancedPage(
 
     val shareTime by settingsViewModel.shareTime.collectAsStateWithLifecycle()
     val autoBoot by settingsViewModel.autoBoot.collectAsStateWithLifecycle()
-
-    val typeToName =
-        mapOf(
-            GraphicsManager.AccelerationType.Lavapipe to
-                stringResource(R.string.settings_graphics_renderer_software),
-            GraphicsManager.AccelerationType.Gfxstream to
-                stringResource(R.string.settings_graphics_renderer_gpu),
-        )
-
-    if (showSelectionDialog) {
-        AlertDialog(
-            onDismissRequest = { showSelectionDialog = false },
-            title = { Text(stringResource(R.string.settings_graphics_title)) },
-            text = {
-                Column(Modifier.selectableGroup()) {
-                    GraphicsManager.AccelerationType.values().forEach { type ->
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .height(56.dp)
-                                .selectable(
-                                    selected = (type == selectedType),
-                                    onClick = { selectedType = type },
-                                    role = Role.RadioButton,
-                                )
-                                .padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(selected = (type == selectedType), onClick = null)
-                            Text(
-                                text = typeToName[type] ?: "",
-                                style = MaterialTheme.typography.bodyLarge,
-                                modifier = Modifier.padding(start = 16.dp),
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showSelectionDialog = false
-                        if (currentType != selectedType) {
-                            VmController.setGraphicsAccelerationType(selectedType)
-                            showRebootDialog = true
-                        }
-                    }
-                ) {
-                    Text(stringResource(android.R.string.ok))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSelectionDialog = false }) {
-                    Text(stringResource(android.R.string.cancel))
-                }
-            },
-        )
-    }
-
-    if (showMemoryDialog) {
-        MemorySizeDialog(
-            currentMemoryMb = currentMemoryMb,
-            minMemoryMb = SettingsViewModel.MIN_MEMORY_MIB,
-            maxMemoryMb = settingsViewModel.maxMemoryMb,
-            onDismissRequest = { showMemoryDialog = false },
-            onConfirm = {
-                settingsViewModel.setMemoryMb(it)
-                showMemoryDialog = false
-                showRebootDialog = true
-            },
-        )
-    }
 
     if (showKeepAwakeDialog) {
         KeepAwakeDialog(
@@ -758,30 +359,6 @@ fun AdvancedPage(
         )
     }
 
-    if (showRebootDialog) {
-        AlertDialog(
-            onDismissRequest = { showRebootDialog = false },
-            title = { Text(stringResource(R.string.settings_graphics_dlg_title_restart)) },
-            text = { Text(stringResource(R.string.settings_graphics_dlg_message_restart)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showRebootDialog = false
-                        mainViewModel.restartVm()
-                        onCloseSettings()
-                    }
-                ) {
-                    Text(stringResource(R.string.settings_graphics_dlg_btn_restart))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRebootDialog = false }) {
-                    Text(stringResource(R.string.settings_graphics_dlg_btn_later))
-                }
-            },
-        )
-    }
-
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
             ListItem(
@@ -793,34 +370,6 @@ fun AdvancedPage(
                     Icon(imageVector = Icons.Default.DisplaySettings, contentDescription = null)
                 },
                 modifier = Modifier.clickable { showResolutionDialog = true },
-            )
-            HorizontalDivider()
-        }
-        if (VmController.isGraphicsAccelerationSupported) {
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.settings_graphics_title)) },
-                    supportingContent = { Text(typeToName[currentType] ?: "") },
-                    leadingContent = {
-                        Icon(imageVector = Icons.Default.Speed, contentDescription = null)
-                    },
-                    modifier =
-                        Modifier.clickable {
-                            selectedType = currentType
-                            showSelectionDialog = true
-                        },
-                )
-                HorizontalDivider()
-            }
-        }
-        item {
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.settings_advanced_memory_title)) },
-                supportingContent = { Text(formatMemorySize(currentMemoryMb)) },
-                leadingContent = {
-                    Icon(imageVector = Icons.Default.Memory, contentDescription = null)
-                },
-                modifier = Modifier.clickable { showMemoryDialog = true },
             )
             HorizontalDivider()
         }
@@ -1135,101 +684,155 @@ private fun formatDisplayResolution(resolution: DisplayResolution): String {
     }
 }
 
+/**
+ * Port forwarding settings for one VM (settings split, Phase 5). The global
+ * Settings screen no longer lists it; [vmId] == null resolves to the active
+ * VM for the port-notification deep link.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PortControlPage() {
-    val ports by VmController.ports.collectAsState()
+fun PortControlPage(vmId: String?) {
+    val effectiveVmId = vmId ?: VmManager.defaultVmId()
+    Scaffold(
+        floatingActionButton = {
+            PortControlFab { VmManager.enablePortForwarding(effectiveVmId, it, true) }
+        }
+    ) { innerPadding ->
+        Box(modifier = Modifier.padding(innerPadding)) {
+            PortControlContent(vmId = effectiveVmId)
+        }
+    }
+}
+
+/** FAB that adds a saved forwarded port to the given VM. */
+@Composable
+private fun PortControlFab(onAdd: (Int) -> Unit) {
     var showAddDialog by remember { mutableStateOf(false) }
-
-    val activePorts = ports.filter { !it.isSaved() }
-    val savedPorts = ports.filter { it.isSaved() }
-
+    val ports by VmManager.allPorts.collectAsStateWithLifecycle()
     if (showAddDialog) {
         AddPortDialog(
             onDismissRequest = { showAddDialog = false },
             onConfirm = { port ->
-                VmController.enablePortForwarding(port, true)
+                onAdd(port)
                 showAddDialog = false
             },
             ports = ports,
         )
     }
+    FloatingActionButton(onClick = { showAddDialog = true }) {
+        Icon(
+            painter = painterResource(R.drawable.ic_add),
+            contentDescription = stringResource(R.string.settings_port_btn_add),
+        )
+    }
+}
 
-    Scaffold(
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_add),
-                    contentDescription = stringResource(R.string.settings_port_btn_add),
-                )
-            }
-        }
-    ) { innerPadding ->
-        if (ports.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize().padding(innerPadding),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(stringResource(R.string.settings_port_message_empty))
-            }
+/**
+ * Embeddable port list for one VM (used by [PortControlPage] and the per-VM
+ * settings surface). Reads the VM's live port flow when it is running, or its
+ * saved ports from the per-VM prefs when stopped.
+ */
+@Composable
+fun PortControlContent(vmId: String) {
+    val context = LocalContext.current
+    val state by remember(vmId) { VmManager.state(vmId) }.collectAsStateWithLifecycle()
+    val livePorts by remember(vmId) { VmManager.ports(vmId) }.collectAsStateWithLifecycle()
+    var savedPorts by remember(vmId) {
+        mutableStateOf(VmSettings.savedPorts(context, vmId))
+    }
+
+    fun refreshSaved() {
+        savedPorts = VmSettings.savedPorts(context, vmId)
+    }
+
+    /** Toggles persist per-VM; the live path also updates the runtime state. */
+    fun setPortEnabled(port: Int, enable: Boolean) {
+        if (state.isAlive) {
+            VmManager.enablePortForwarding(vmId, port, enable)
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-                if (activePorts.isNotEmpty()) {
-                    item {
-                        Text(
-                            text = stringResource(R.string.settings_port_title_active_ports),
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.padding(16.dp),
-                        )
-                    }
-                    items(activePorts) { port ->
-                        ListItem(
-                            headlineContent = { Text("${port.port} (${port.name})") },
-                            trailingContent = {
-                                Switch(
-                                    checked = port.isForwarded,
-                                    onCheckedChange = { isChecked ->
-                                        VmController.enablePortForwarding(port.port, isChecked)
-                                    },
-                                )
-                            },
-                        )
-                    }
-                }
+            VmSettings.setSavedPort(context, vmId, port, enable)
+        }
+        refreshSaved()
+    }
 
-                if (savedPorts.isNotEmpty()) {
-                    item {
-                        Text(
-                            text = stringResource(R.string.settings_port_title_saved_ports),
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.padding(16.dp),
-                        )
-                    }
-                    items(savedPorts) { port ->
-                        ListItem(
-                            headlineContent = { Text(port.port.toString()) },
-                            trailingContent = {
-                                IconButton(
-                                    onClick = {
-                                        VmController.enablePortForwarding(port.port, false)
-                                    }
-                                ) {
-                                    Icon(
-                                        painter = painterResource(R.drawable.ic_close),
-                                        contentDescription =
-                                            stringResource(
-                                                R.string.settings_port_btn_delete,
-                                                port.port,
-                                            ),
-                                    )
-                                }
-                            },
-                        )
-                    }
+    var showAddDialog by remember { mutableStateOf(false) }
+    if (showAddDialog) {
+        val existing = livePorts.map { it.port } + savedPorts
+        AddPortDialog(
+            onDismissRequest = { showAddDialog = false },
+            onConfirm = { port ->
+                setPortEnabled(port, true)
+                showAddDialog = false
+            },
+            ports = existing.map { OpenPort(it, "", true) },
+        )
+    }
+
+    val activePorts = livePorts.filter { !it.isSaved() }
+    val savedPortsLive = livePorts.filter { it.isSaved() }.map { it.port }
+    val savedPortsAll = (savedPortsLive + savedPorts).distinct().sorted()
+
+    if (livePorts.isEmpty() && savedPortsAll.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(stringResource(R.string.settings_port_message_empty))
+        }
+    } else {
+        Column {
+            if (activePorts.isNotEmpty()) {
+                Text(
+                    text = stringResource(R.string.settings_port_title_active_ports),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(16.dp),
+                )
+                activePorts.forEach { port ->
+                    ListItem(
+                        headlineContent = { Text("${port.port} (${port.name})") },
+                        trailingContent = {
+                            Switch(
+                                checked = port.isForwarded,
+                                onCheckedChange = { isChecked ->
+                                    VmManager.enablePortForwarding(vmId, port.port, isChecked)
+                                },
+                            )
+                        },
+                    )
+                }
+            }
+
+            if (savedPortsAll.isNotEmpty()) {
+                Text(
+                    text = stringResource(R.string.settings_port_title_saved_ports),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(16.dp),
+                )
+                savedPortsAll.forEach { port ->
+                    ListItem(
+                        headlineContent = { Text(port.toString()) },
+                        trailingContent = {
+                            IconButton(onClick = { setPortEnabled(port, false) }) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_close),
+                                    contentDescription =
+                                        stringResource(
+                                            R.string.settings_port_btn_delete,
+                                            port,
+                                        ),
+                                )
+                            }
+                        },
+                    )
                 }
             }
         }
     }
+
+    ListItem(
+        headlineContent = { Text(stringResource(R.string.settings_port_btn_add)) },
+        modifier = Modifier.clickable { showAddDialog = true },
+    )
 }
 
 @Composable

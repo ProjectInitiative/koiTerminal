@@ -30,8 +30,8 @@ import com.android.virtualization.koiterminal.ForwarderHost.ForwardingCallbackIm
 import com.android.virtualization.koiterminal.ForwarderHostSetup
 import com.android.virtualization.koiterminal.MainActivity.Companion.TAG
 import com.android.virtualization.koiterminal.Socks5Setup
+import com.android.virtualization.koiterminal.new2.core.VmSettings
 import com.android.virtualization.koiterminal.new2.ui.main.NetworkConnection
-import com.android.virtualization.koiterminal.new2.ui.main.SettingsViewModel
 import com.android.virtualization.terminal.proto.ActivePort
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +44,7 @@ internal class DebianService(
     private val guestAgent: IGuestAgent,
     private val koi_service: IkoiService?,
     private val service: IDebianService,
+    private val vmId: String,
 ) : DebianServiceBase {
     private lateinit var portsStateManager: PortsStateManager
     private val portsStateListener: PortsStateManager.Listener =
@@ -59,10 +60,9 @@ internal class DebianService(
         portsStateManager = PortsStateManager.getInstance(context)
         portsStateManager.registerListener(portsStateListener)
         updateListeningPorts()
-        val sharedPref = context.getSharedPreferences(SettingsViewModel.PREFS_NAME, Context.MODE_PRIVATE)
-        val currentNetwork = SettingsViewModel.networkConnectionPref(sharedPref)
-        val socks5Delegate = SettingsViewModel.socks5DelegatePref(sharedPref)
-        val socks5LoopbackOk = SettingsViewModel.socks5LoopbackOkPref(sharedPref)
+        val currentNetwork = VmSettings.networkConnectionPref(context, vmId)
+        val socks5Delegate = VmSettings.socks5DelegatePref(context, vmId)
+        val socks5LoopbackOk = VmSettings.socks5LoopbackOkPref(context, vmId)
         val isDelegate = currentNetwork == NetworkConnection.DELEGATE_SOCKS5
         val isManaged = currentNetwork == NetworkConnection.MANAGED_SOCKS5
         val enableSocks5 = isDelegate || isManaged

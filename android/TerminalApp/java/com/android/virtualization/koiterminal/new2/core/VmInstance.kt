@@ -179,28 +179,30 @@ class VmInstance(
         scope.launch {
             _vmState.value = VmState.Starting
             try {
+                // Sync the port-forwarding runtime state with this VM's saved
+                // ports (per-VM prefs, falling back to the legacy globals).
+                VmSettings.seedPorts(context, vmId)
                 val image = InstalledImage.forSlot(context, vmId)
                 val json = ConfigJson.from(context, image.configPath)
                 vmConfigJson = json
                 val configBuilder = json.toConfigBuilder(context)
                 Log.d(TAG, "image.isAidlGuestAgent=${image.isAidlGuestAgent()}")
                 _guestAgentController.value =
-                    GuestAgentController(context, image.isAidlGuestAgent(), scope)
+                    GuestAgentController(context, vmId, image.isAidlGuestAgent(), scope)
 
                 val sharedPref =
                     context.getSharedPreferences(SettingsViewModel.PREFS_NAME, Context.MODE_PRIVATE)
-                val memoryMib =
-                    sharedPref.getInt(
-                        SettingsViewModel.KEY_MEMORY_MIB,
-                        SettingsViewModel.DEFAULT_MEMORY_MIB,
-                    )
+                // Memory / network are per-VM settings (multi-VM plan Phase 5);
+                // VmSettings falls back to the legacy global prefs when the VM
+                // has no per-VM prefs yet.
+                val memoryMib = VmSettings.memoryMib(context, vmId)
                 configBuilder.setMemoryBytes(memoryMib.toLong() * 1024 * 1024)
 
                 val customImageConfigBuilder = json.toCustomImageConfigBuilder(context)
 
                 // Network specified in settings, but if VM config denies it, we treat it as denied
                 if (customImageConfigBuilder.build().useNetwork()) {
-                    val network: NetworkConnection = SettingsViewModel.networkConnectionPref(sharedPref)
+                    val network: NetworkConnection = VmSettings.networkConnectionPref(context, vmId)
                     if (network != NetworkConnection.FULL) {
                         customImageConfigBuilder.useNetwork(false)
                     }
@@ -320,7 +322,7 @@ class VmInstance(
 
                             _guestAgentController.value?.start(guestAgent, debian_service, koi_service)
 
-                            if (SettingsViewModel.shareTimePref(sharedPref)) {
+                            if (SettingsViewModel.shareTimePref(sharedPref)) { // global setting (Phase 5)
                                 _guestAgentController.value?.setTime()
                             }
                             sharedPref.registerOnSharedPreferenceChangeListener(
@@ -411,7 +413,9 @@ class VmInstance(
     }
 
     private fun setGpuConfig(context: Context, builder: VirtualMachineCustomImageConfig.Builder) {
-        if (GraphicsManager.getInstance(context).isGfxstreamEnabled()) {
+        // Graphics acceleration is a per-VM setting (Phase 5); falls back to
+        // the global GraphicsManager when the VM has no per-VM prefs.
+        if (VmSettings.isGfxstreamEnabled(context, vmId)) {
             builder.addParam("gfxstream_enabled")
             builder.setGpuConfig(
                 VirtualMachineCustomImageConfig.GpuConfig.Builder()

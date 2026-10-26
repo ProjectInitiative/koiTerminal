@@ -100,6 +100,11 @@ object VmManager {
             if (migrated != null) {
                 Log.i(TAG, "Migrated legacy install to VM '${migrated.id}'")
             }
+            // One-time claim of the legacy global saved ports for the migrated
+            // default VM (settings split, Phase 5); no-op when already claimed.
+            if (VmRegistry.list(appContext).any { it.id == VmRegistry.LEGACY_VM_ID }) {
+                VmSettings.sealLegacyPorts(appContext, VmRegistry.LEGACY_VM_ID)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Legacy install migration failed", e)
         }

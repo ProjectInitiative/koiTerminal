@@ -43,6 +43,7 @@ data class OpenPort(val port: Int, val name: String, val isForwarded: Boolean) {
 
 class GuestAgentController(
     private val context: Context,
+    private val vmId: String,
     private val aidlGuestAgent: Boolean,
     private val scope: CoroutineScope,
 ) {
@@ -99,7 +100,7 @@ class GuestAgentController(
             Log.w(TAG, "GuestAgentController is started again. It might had been crashed.")
             stop() // Safely stop existing before recreating
         }
-        debianService = DebianService(context, scope, vm, guestAgent, koi_service, service)
+        debianService = DebianService(context, scope, vm, guestAgent, koi_service, service, vmId)
         koiService = koi_service
         clipboardController = ClipboardController(context, service)
         portsStateManager.registerListener(portsListener)
@@ -152,6 +153,9 @@ class GuestAgentController(
 
     fun enablePortForwarding(port: Int, enable: Boolean) {
         portsStateManager.updateEnabledPort(port, enable)
+        // Persist per-VM (settings split, Phase 5); the PortsStateManager
+        // update above keeps the ForwarderHost runtime in sync.
+        VmSettings.setSavedPort(context, vmId, port, enable)
         Log.d(TAG, "portsStateManager.updateEnabledPort($port, $enable)")
     }
 
