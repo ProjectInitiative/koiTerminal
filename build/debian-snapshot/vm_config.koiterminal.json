@@ -7,7 +7,7 @@
                     "label": "ROOT",
                     "path": "$PAYLOAD_DIR/root_part",
                     "writable": true,
-                    "guid": "{root_part_guid}"
+                    "guid": "7a8c2a3d-b0ba-4e2d-a94c-5eb806cd437a"
                 }
             ],
             "writable": true

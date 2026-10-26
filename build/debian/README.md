@@ -31,14 +31,20 @@ Download [Google's image (Wayback Machine archive)](https://web.archive.org/web/
 5. Repackage `images/cidata.iso` (see [how they did that](build/debian/build.sh#L295)).
 6. Repackage `images.tar.gz`.
 
-> [!IMPORTANT]
-> `build/debian-snapshot/vm_config.koiterminal.json` still contains the
-> `{root_part_guid}` placeholder, and `build_internal.sh` (which normally
-> substitutes it via `sfdisk --part-uuid`) never runs in this path. After
-> installing to a slot, replace it with a valid UUID — e.g.
-> `sed -i 's/{root_part_guid}/<uuid>/' <slot>/vm_config.json` — otherwise VM
-> start fails with an unrecoverable error. (The guest mounts root by device
-> path, `root=/dev/vda1`, so any valid UUID works.)
+> [!NOTE]
+> `build/debian-snapshot/vm_config.koiterminal.json` is a ready-to-use copy of
+> the Method-2 config with two changes vs. the Google original:
+>
+> - **No `hugepages`** — hugepage-backed guest RAM silently wedges the vCPUs on
+>   pKVM/Tensor G5 (crosvm idle, zero console output, spinner forever).
+> - **A real `guid`** instead of the `{root_part_guid}` placeholder — an invalid
+>   GUID fails VM start with an unrecoverable error. (The guest mounts root by
+>   device path, `root=/dev/vda1`, so any valid UUID works.)
+>
+> If you re-create the snapshot from a fresh Google image, re-apply both.
+> Note `root_part` arrives as ~2.9 GB and is sparse-ballooned to 95% of host
+> storage by `VmInstance.truncateDiskIfNecessary()` on first start — that is
+> expected.
 ```
 mkdir images
 tar xzf images.tar.gz --directory images/
