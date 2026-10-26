@@ -75,7 +75,7 @@ class VmService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, createRunNotification(VmState.Ready))
+        startForeground(NOTIFICATION_ID, createRunNotification(VmRegistry.LEGACY_VM_ID, VmState.Ready))
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "TerminalApp:KeepAwake")
@@ -86,7 +86,7 @@ class VmService : LifecycleService() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
 
         monitorInstaller()
-        monitorVmController()
+        monitorVms()
         monitorPorts()
         updateWakeLockState()
     }
@@ -110,9 +110,9 @@ class VmService : LifecycleService() {
         }
 
         // Update the main notification to show the "Keep awake" status
-        val vmState = VmController.vmState.value
-        if (vmState.isAlive) {
-            val notification = createRunNotification(vmState)
+        val alive = aliveEntry()
+        if (alive != null) {
+            val notification = createRunNotification(alive.first, alive.second)
             getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
         }
     }
@@ -254,11 +254,12 @@ class VmService : LifecycleService() {
         }
     }
 
-    private fun monitorVmController() {
+    private fun monitorVms() {
         lifecycleScope.launch {
-            VmController.vmState.collect { state ->
-                if (state.isAlive) {
-                    val notification = createRunNotification(state)
+            VmManager.states.collect { states ->
+                val alive = states.entries.firstOrNull { it.value.isAlive }
+                if (alive != null) {
+                    val notification = createRunNotification(alive.key, alive.value)
                     getSystemService(NotificationManager::class.java)
                         .notify(NOTIFICATION_ID, notification)
                 }
@@ -269,11 +270,11 @@ class VmService : LifecycleService() {
 
     private fun checkStopSelf() {
         val installState = Installer.installState.value
-        val vmState = VmController.vmState.value
 
         val isInstalling = installState is InstallState.Installing
+        val anyVmAlive = VmManager.states.value.values.any { it.isAlive }
 
-        if (!isInstalling && !vmState.isAlive) {
+        if (!isInstalling && !anyVmAlive) {
             stopSelf()
         }
     }
@@ -281,7 +282,12 @@ class VmService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CANCEL_INSTALL -> Installer.cancelInstall()
-            ACTION_STOP_VM -> VmController.stop()
+            ACTION_STOP_VM -> {
+                val vmId = intent.getStringExtra(EXTRA_VM_ID) ?: VmManager.activeVmId.value
+                if (vmId != null) {
+                    VmManager.stop(vmId)
+                }
+            }
             ACTION_TURN_OFF_KEEP_AWAKE -> {
                 val sharedPref =
                     getSharedPreferences(SettingsViewModel.PREFS_NAME, Context.MODE_PRIVATE)
@@ -360,8 +366,15 @@ class VmService : LifecycleService() {
             .build()
     }
 
-    private fun createRunNotification(state: VmState): Notification {
-        val stopIntent = Intent(this, VmService::class.java).apply { action = ACTION_STOP_VM }
+    private fun aliveEntry(): Pair<String, VmState>? =
+        VmManager.states.value.entries.firstOrNull { it.value.isAlive }?.let { it.key to it.value }
+
+    private fun createRunNotification(vmId: String, state: VmState): Notification {
+        val stopIntent =
+            Intent(this, VmService::class.java).apply {
+                action = ACTION_STOP_VM
+                putExtra(EXTRA_VM_ID, vmId)
+            }
         val stopPending =
             PendingIntent.getService(this, 2, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
@@ -452,6 +465,7 @@ class VmService : LifecycleService() {
         private const val ACTION_PORT_FORWARD = "ACTION_PORT_FORWARD"
         private const val EXTRA_PORT = "EXTRA_PORT"
         private const val EXTRA_ENABLE = "EXTRA_ENABLE"
+        private const val EXTRA_VM_ID = "EXTRA_VM_ID"
         private const val CHANNEL_ID = "vm_service_channel"
         private const val KEEP_AWAKE_CHANNEL_ID = "vm_keep_awake_channel"
         private const val PORT_CHANNEL_ID = "vm_port_channel"

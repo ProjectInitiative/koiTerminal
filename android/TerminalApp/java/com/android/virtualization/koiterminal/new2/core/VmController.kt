@@ -16,110 +16,67 @@
 package com.android.virtualization.koiterminal.new2.core
 
 import android.content.Context
-import android.content.Intent
-import android.content.SharedPreferences
-import android.net.nsd.NsdManager
-import android.net.nsd.NsdServiceInfo
-import android.os.IBinder
-import android.os.StatFs
-import android.os.SystemProperties
-import android.system.virtualizationcommon.IGuestAgent
-import android.system.virtualizationservice.DisplayConfig
 import android.system.virtualmachine.VirtualMachine
-import android.system.virtualmachine.VirtualMachineCallback
-import android.system.virtualmachine.VirtualMachineConfig
-import android.system.virtualmachine.VirtualMachineCustomImageConfig
-import android.system.virtualmachine.VirtualMachineException
-import android.system.virtualmachine.VirtualMachineManager
 import android.util.Log
-import com.android.virtualization.debian.aidl.IDebianService
-import com.android.virtualization.debian.aidl.IkoiService
-import com.android.virtualization.koiterminal.AndroidToVmBridge
 import com.android.virtualization.koiterminal.CertificateUtils
-import com.android.virtualization.koiterminal.ConfigJson
 import com.android.virtualization.koiterminal.GraphicsManager
-import com.android.virtualization.koiterminal.InstalledImage
-import com.android.virtualization.koiterminal.InstalledImage.Companion.roundUp
-import com.android.virtualization.koiterminal.NoLogger
-import com.android.virtualization.koiterminal.TerminalThreadFactory
-import com.android.virtualization.koiterminal.new2.ui.main.SettingsViewModel
-import com.android.virtualization.koiterminal.new2.ui.main.NetworkConnection
-import com.android.virtualization.koiterminal.new2.util.LoggingMutableStateFlow
-import java.io.IOException
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import com.android.virtualization.koiterminal.SerialIOManager
 
+/**
+ * Legacy single-VM facade over [VmManager].
+ *
+ * Delegates to the active VM instance (the most recently started VM, or the
+ * migrated default VM) so existing call sites keep compiling during the
+ * multi-VM migration. New code should use [VmManager] directly with an
+ * explicit vmId.
+ */
 object VmController {
     private val TAG = "VmController"
 
     private lateinit var context: Context
-    private var serialIO: SerialIOManager? = null
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val _vmState = LoggingMutableStateFlow<VmState>(MutableStateFlow(VmState.Ready), TAG)
-    val vmState: StateFlow<VmState> = _vmState.asStateFlow()
+
+    /** State of the active VM. */
+    val vmState: StateFlow<VmState>
+        get() = VmManager.activeInstance().vmState
 
     private val _sessionDiscarded = MutableSharedFlow<String>()
     val sessionDiscarded: SharedFlow<String> = _sessionDiscarded.asSharedFlow()
 
-    private val _guestAgentController = MutableStateFlow<GuestAgentController?>(null)
-
-    @OptIn(ExperimentalCoroutinesApi::class)
+    /** Open ports across all VMs (only one runs at a time). */
     val ports: StateFlow<List<OpenPort>> =
-        _guestAgentController
-            .flatMapLatest { controller ->
-                // If controller is null, emit a flow containing null
-                controller?.ports ?: flowOf(emptyList())
-            }
-            .stateIn(
-                scope = repositoryScope,
-                started = SharingStarted.WhileSubscribed(5000),
-                initialValue = emptyList(),
-            )
+        VmManager.allPorts.stateIn(
+            scope = repositoryScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptyList(),
+        )
 
-    var virtualMachine: VirtualMachine? = null
-        private set
-
-    private var vmConfig: VirtualMachineConfig? = null
-        private set
-
-    private var vmConfigJson: ConfigJson? = null
-        private set
+    /** The AVF VirtualMachine of the active VM. */
+    val virtualMachine: VirtualMachine?
+        get() = VmManager.activeInstance().virtualMachine
 
     fun initialize(context: Context) {
         this.context = context.applicationContext
+        VmManager.initialize(this.context)
         val key = CertificateUtils.createOrGetKey()
         CertificateUtils.writeCertificateToFile(this.context, key.certificate)
     }
 
     fun reset() {
-        if (
-            _vmState.value == VmState.Stopped ||
-                _vmState.value is VmState.Error ||
-                _vmState.value == VmState.Rebooting
-        ) {
-            _vmState.value = VmState.Ready
-        }
+        VmManager.reset(activeVmId())
     }
 
     fun enablePortForwarding(port: Int, enable: Boolean) {
-        _guestAgentController.value?.enablePortForwarding(port, enable)
+        VmManager.enablePortForwarding(activeVmId(), port, enable)
     }
 
     val graphicsAccelerationType: GraphicsManager.AccelerationType
@@ -133,15 +90,15 @@ object VmController {
     }
 
     fun shutdownVm() {
-        _guestAgentController.value?.shutdownVm()
+        VmManager.activeInstance().shutdownVm()
     }
 
     fun pullClipboardFromGuest() {
-        _guestAgentController.value?.pullClipboardFromGuest()
+        VmManager.activeInstance().pullClipboardFromGuest()
     }
 
     fun pushClipboardToGuest() {
-        _guestAgentController.value?.pushClipboardToGuest()
+        VmManager.activeInstance().pushClipboardToGuest()
     }
 
     fun requestSessionDiscard(sessionId: String) {
@@ -149,450 +106,22 @@ object VmController {
     }
 
     fun resizeTtyWindow(columns: Int, rows: Int) {
-        val target = vmConfigJson?.getConsoleInputDevice() ?: ConfigJson.DEFAULT_CONSOLE_INPUT_DEVICE
-        val targetEnum = when (target) {
-            "hvc0" -> IkoiService.TTY_HVC0
-            "ttyS0" -> IkoiService.TTY_TTYS0
-            else -> IkoiService.TTY_HVC0
-        }
-        _guestAgentController.value?.resizeTtyWindow(targetEnum, columns, rows)
+        VmManager.activeInstance().resizeTtyWindow(columns, rows)
     }
 
     // It should add and then remove a display to reflect the change.
     fun resizeDisplay(width: Int, height: Int, dpi: Int, refreshRate: Int) {
-        val vm = virtualMachine ?: return
-        try {
-            val displays = vm.getDisplays()
-            if (displays.isNotEmpty()) {
-                val oldDisplay = displays[0]
-                if (
-                    oldDisplay.config.width == width &&
-                        oldDisplay.config.height == height &&
-                        oldDisplay.config.refreshRate == refreshRate
-                ) {
-                    return
-                }
-            }
-            val config = DisplayConfig()
-            config.width = width
-            config.height = height
-            config.horizontalDpi = dpi
-            config.verticalDpi = dpi
-            config.refreshRate = refreshRate
-            vm.addDisplay(config)
-            if (displays.isNotEmpty()) {
-                val oldDisplay = displays[0]
-                vm.removeDisplay(oldDisplay.id)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to resize display", e)
-        }
+        VmManager.activeInstance().resizeDisplay(width, height, dpi, refreshRate)
     }
 
     fun start() {
-        if (_vmState.value is VmState.Running || _vmState.value is VmState.Starting) return
-
-        val intent = Intent(context, VmService::class.java)
-        context.startForegroundService(intent)
-        repositoryScope.launch {
-            _vmState.value = VmState.Starting
-            try {
-                val image = InstalledImage.getDefault(context)
-                val json = ConfigJson.from(context, image.configPath)
-                vmConfigJson = json
-                val configBuilder = json.toConfigBuilder(context)
-                Log.d(TAG, "image.isAidlGuestAgent=${image.isAidlGuestAgent()}")
-                _guestAgentController.value =
-                    GuestAgentController(context, image.isAidlGuestAgent(), repositoryScope)
-
-                val sharedPref =
-                    context.getSharedPreferences(SettingsViewModel.PREFS_NAME, Context.MODE_PRIVATE)
-                val memoryMib =
-                    sharedPref.getInt(
-                        SettingsViewModel.KEY_MEMORY_MIB,
-                        SettingsViewModel.DEFAULT_MEMORY_MIB,
-                    )
-                configBuilder.setMemoryBytes(memoryMib.toLong() * 1024 * 1024)
-
-                val customImageConfigBuilder = json.toCustomImageConfigBuilder(context)
-
-                // Network specified in settings, but if VM config denies it, we treat it as denied
-                if (customImageConfigBuilder.build().useNetwork()) {
-                    val network: NetworkConnection = SettingsViewModel.networkConnectionPref(sharedPref)
-                    if (network != NetworkConnection.FULL) {
-                        customImageConfigBuilder.useNetwork(false)
-                    }
-                }
-
-                // Convert rootfs disk into a sparse file for storage ballooning.
-                truncateDiskIfNecessary(image)
-
-                if (image.hasBackup()) {
-                    customImageConfigBuilder.addDisk(
-                        VirtualMachineCustomImageConfig.Disk.RWDisk(image.backupFile.toString())
-                    )
-                }
-
-                try {
-                    val port = _guestAgentController.value!!.startServer()
-                    Log.d(TAG, "gRPC startServer() returns port=$port")
-                    customImageConfigBuilder.addParam("debian_server_port=$port")
-                } catch (e: RuntimeException) {
-                    // Ignore if failed due to revoked NETWORK permission on GrapheneOS
-                    Log.d(TAG, "Guest control server cannot be started: ${e.message}, ${e.cause}")
-                    if (e.message?.contains(Regex("""grpc server""")) == false) {
-                        throw e
-                    }
-                }
-
-                // Override config for Display
-                setDisplayConfig(customImageConfigBuilder)
-                setGpuConfig(context, customImageConfigBuilder)
-                customImageConfigBuilder.setAudioConfig(
-                    VirtualMachineCustomImageConfig.AudioConfig.Builder()
-                        .setUseSpeaker(true)
-                        .setUseMicrophone(true)
-                        .build()
-                )
-                configBuilder.setCustomImageConfig(customImageConfigBuilder.build())
-
-                val config = configBuilder.build()
-
-                val vmm = context.getSystemService(VirtualMachineManager::class.java)!!
-                val vmName = config.customImageConfig!!.name!!
-
-                val deduplicate = {
-                    try {
-                        vmm.get(vmName)?.let { // Clean up existing VM if it's not stopped
-                            if (it.status != VirtualMachine.STATUS_STOPPED) {
-                                Log.e(TAG, "stopping vm because it is not stopped")
-                                it.stop()
-                            }
-                            // TODO: revisit this to see if we can omit this step.
-                            vmm.delete(vmName)
-                        }
-                    } catch (e: VirtualMachineException) {
-                        // Ignore if VM doesn't exist
-                    }
-                }
-                deduplicate()
-
-                val callback =
-                    object : VirtualMachineCallback {
-                        override fun onPayloadStarted(vm: VirtualMachine) {}
-
-                        override fun onPayloadReady(vm: VirtualMachine) {}
-
-                        override fun onPayloadFinished(vm: VirtualMachine, exitCode: Int) {}
-
-                        override fun onError(vm: VirtualMachine, errorCode: Int, message: String) {
-                            Log.e(TAG, "VM error: $message ($errorCode)")
-                            _vmState.value = VmState.Error(RuntimeException("VM error: $message"))
-                            _guestAgentController.value?.stop()
-                        }
-
-                        override fun onStopped(vm: VirtualMachine, reason: Int) {
-                            Log.i("VmController", "VM stopped. reason: $reason")
-                            if (
-                                reason == VirtualMachineCallback.STOP_REASON_SHUTDOWN ||
-                                    reason == VirtualMachineCallback.STOP_REASON_KILLED
-                            ) {
-                                _vmState.value = VmState.Stopped
-                            } else if (reason == VirtualMachineCallback.STOP_REASON_REBOOT) {
-                                _vmState.value = VmState.Rebooting
-                            } else {
-                                Log.e("VmController", "VM stopped unexpectedly. reason: $reason")
-                                _vmState.value =
-                                    VmState.Error(
-                                        RuntimeException("VM stopped unexpectedly: $reason")
-                                    )
-                            }
-                            _guestAgentController.value?.stop()
-                        }
-
-                        override fun onGuestAgentRegistered(
-                            vm: VirtualMachine,
-                            guestAgent: IGuestAgent,
-                        ) {
-                            Log.d(TAG, "Guest agent registered. Imply AIDL connection")
-
-                            var binder: IBinder? = null
-                            try {
-                                binder = vm.connectToVsockServer(IDebianService.VSOCK_PORT)
-                            } catch (e: Exception) {
-                                _vmState.value =
-                                    VmState.Error(
-                                        RuntimeException("Failed to connect to guest agent", e)
-                                    )
-                                return
-                            }
-                            val debian_service = IDebianService.Stub.asInterface(binder)
-
-                            var koi_service: IkoiService? = null
-                            try {
-                                val koi_binder = vm.connectToVsockServer(IkoiService.VSOCK_PORT)
-                                koi_service = koi_binder?.let { IkoiService.Stub.asInterface(it) }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Guest koiService agent cannot be registered", e)
-                            }
-
-                            _guestAgentController.value?.start(guestAgent, debian_service, koi_service)
-
-                            if (SettingsViewModel.shareTimePref(sharedPref)) {
-                                _guestAgentController.value?.setTime()
-                            }
-                            sharedPref.registerOnSharedPreferenceChangeListener(
-                                SharedPreferences.OnSharedPreferenceChangeListener { sharedPref, key ->
-                                    if (key == SettingsViewModel.KEY_SHARE_TIME && SettingsViewModel.shareTimePref(sharedPref)) {
-                                        _guestAgentController.value?.setTime()
-                                    }
-                                }
-                            )
-
-                            Log.d(TAG, "Guest agent ready")
-                        }
-                    }
-
-                try {
-                    val vm = vmm.create(vmName, config)
-                    virtualMachine = vm
-                    vm.setCallback(Executors.newSingleThreadExecutor(), callback)
-                    vm.run()
-                    vmConfig = config
-                } catch (e: VirtualMachineException) {
-                    // Check for denied Network permission (on GrapheneOS)
-                    val serviceSpecificException = e.cause
-                    if (serviceSpecificException?.message?.contains(Regex("""does not have the android\.permission\.INTERNET permission""")) == true) {
-                        // Override network to false
-                        customImageConfigBuilder.useNetwork(false)
-                        configBuilder.setCustomImageConfig(customImageConfigBuilder.build())
-                        val config = configBuilder.build()
-                        // try again
-                        deduplicate()
-                        val vm = vmm.create(vmName, config)
-                        virtualMachine = vm
-                        vm.setCallback(Executors.newSingleThreadExecutor(), callback)
-                        vm.run()
-                        vmConfig = config
-                    } else {
-                        throw e
-                    }
-                }
-                _guestAgentController.value?.setVm(virtualMachine!!)
-
-                // Logger.setup(context, vm, Executors.newSingleThreadExecutor())
-                serialIO = NoLogger.setup(context, virtualMachine!!, Executors.newSingleThreadExecutor())
-                val outReadingPfd = serialIO?.getSerialOutPfd()
-                val inWritingPfd = serialIO?.getSerialInPfd()
-                Log.i("VmController", "inWritingPfd=${inWritingPfd?.getFd()} outReadingPfd=${outReadingPfd?.getFd()}")
-
-                if (canUseTtydOverVsock()) {
-                    Log.i(TAG, "Connect to ttyd using vsock")
-                    val bridge = AndroidToVmBridge(virtualMachine!!)
-                    val port = bridge.start()
-                    if (port == null) {
-                        Log.e(TAG, "Failed to start bridge")
-                        _vmState.value = VmState.Error(RuntimeException("Failed to start bridge"))
-                    } else {
-                        Log.d(TAG, "localhost is running with port=" + port)
-                        _vmState.value =
-                            VmState.Running(outReadingPfd, inWritingPfd, TerminalAddress("localhost", port, bridge.secretKey))
-                    }
-                } else if (outReadingPfd != null && inWritingPfd != null) {
-                    Log.d(TAG, "VM considered running once serial IO is ready: $outReadingPfd, $inWritingPfd")
-                    _vmState.value =
-                        VmState.Running(outReadingPfd, inWritingPfd, null)
-                }
-
-                val timeout = json.getBootTimeoutSecs() ?: 60
-                val effectiveTimeout = if (IS_EMULATOR) (timeout * 10) else timeout
-
-                if (image.isAidlGuestAgent()) {
-                    repositoryScope.launch {
-                        delay(TimeUnit.SECONDS.toMillis(effectiveTimeout.toLong()))
-                        if (_vmState.value == VmState.Starting) {
-                            _vmState.value =
-                                VmState.Error(
-                                    RuntimeException("Timed out waiting for terminal service")
-                                )
-                        }
-                    }
-                } else if (!canUseTtydOverVsock()) {
-                    startTtydDiscovery(effectiveTimeout.toLong())
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to start VM", e)
-                _vmState.value = VmState.Error(e)
-                _guestAgentController.value?.stop()
-            }
-        }
-    }
-
-    private fun setGpuConfig(context: Context, builder: VirtualMachineCustomImageConfig.Builder) {
-        if (GraphicsManager.getInstance(context).isGfxstreamEnabled()) {
-            builder.addParam("gfxstream_enabled")
-            builder.setGpuConfig(
-                VirtualMachineCustomImageConfig.GpuConfig.Builder()
-                    .setBackend("gfxstream")
-                    .setRendererUseEgl(false)
-                    .setRendererUseGles(false)
-                    .setRendererUseGlx(false)
-                    .setRendererUseSurfaceless(true)
-                    .setRendererUseVulkan(true)
-                    .setContextTypes(arrayOf<String>("gfxstream-vulkan", "gfxstream-composer"))
-                    // TODO(b/492372616): check if we need to set these features for kernel 6.12
-                    .setRendererFeatures(
-                        "VulkanDisableCoherentMemoryAndEmulate:enabled;VulkanAllocateHostVisibleAsUdmabuf:enabled;ExternalBlob:enabled"
-                    )
-                    .build()
-            )
-        }
-    }
-
-    private fun setDisplayConfig(builder: VirtualMachineCustomImageConfig.Builder) {
-        // Set a placeholder display config to prevent gfxstream from crashing when it's enabled.
-        // It will be replaced with the actual resolution once the surface is created.
-        builder
-            .setDisplayConfig(
-                VirtualMachineCustomImageConfig.DisplayConfig.Builder()
-                    .setWidth(1280)
-                    .setHeight(720)
-                    .setHorizontalDpi(160)
-                    .setVerticalDpi(160)
-                    .setRefreshRate(60)
-                    .build()
-            )
-            .useKeyboard(true)
-            .useMouse(true)
-            .useTouch(true)
-            .useTrackpad(true)
-    }
-
-    private fun startTtydDiscovery(timeoutSecs: Long) {
-        check(!canUseTtydOverVsock()) {
-            "startTtydDiscovery should only be called when ttyd over http is used"
-        }
-        val executor =
-            Executors.newSingleThreadExecutor(TerminalThreadFactory(context.applicationContext))
-        val nsdManager = context.getSystemService<NsdManager>(NsdManager::class.java)!!
-        val queryInfo = NsdServiceInfo()
-        queryInfo.serviceType = "_http._tcp"
-        queryInfo.serviceName = "ttyd"
-
-        var isDiscovered = false
-
-        val callback =
-            object : NsdManager.ServiceInfoCallback {
-                override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) {}
-
-                override fun onServiceInfoCallbackUnregistered() {
-                    executor.shutdown()
-                }
-
-                override fun onServiceLost() {}
-
-                override fun onServiceUpdated(info: NsdServiceInfo) {
-                    val hasUsableAddress = info.hostAddresses.any { !it.isLinkLocalAddress }
-
-                    if (!hasUsableAddress) {
-                        return
-                    }
-
-                    if (!isDiscovered) {
-                        isDiscovered = true
-                        try {
-                            nsdManager.unregisterServiceInfoCallback(this)
-                        } catch (e: IllegalArgumentException) {
-                            // Ignore if already unregistered
-                        }
-                        val ipAddress =
-                            info.hostAddresses
-                                .firstOrNull { !it.isLinkLocalAddress }!!
-                                .hostAddress!!
-                        val port = info.port
-
-                        when (val it = _vmState.value) {
-                            is VmState.Running -> {
-                                _vmState.value = VmState.Running(it.outReadingPfd, it.inWritingPfd, TerminalAddress(ipAddress, port))
-                            }
-                            else -> {
-                                _vmState.value = VmState.Running(null, null, TerminalAddress(ipAddress, port))
-                            }
-                        }
-                    }
-                }
-            }
-
-        nsdManager.registerServiceInfoCallback(queryInfo, executor, callback)
-
-        repositoryScope.launch {
-            delay(TimeUnit.SECONDS.toMillis(timeoutSecs))
-            if (!isDiscovered) {
-                try {
-                    nsdManager.unregisterServiceInfoCallback(callback)
-                } catch (e: IllegalArgumentException) {
-                    // Ignore if already unregistered
-                }
-            }
-        }
-    }
-
-    private fun canUseTtydOverVsock(): Boolean {
-        val buildId = InstalledImage.getDefault(context).buildInfo?.buildId ?: 0
-        val FIRST_VERSION_SUPPORTS_TTYD_VSOCK = 5106
-        return buildId >= FIRST_VERSION_SUPPORTS_TTYD_VSOCK
+        VmManager.start(activeVmId())
     }
 
     fun stop() {
-        if (_vmState.value == VmState.Stopped || _vmState.value == VmState.Stopping) return
-
-        repositoryScope.launch {
-            _vmState.value = VmState.Stopping
-            try {
-                virtualMachine?.stop()
-            } catch (e: VirtualMachineException) {
-                Log.w("VmController", "Failed to stop VM", e)
-            }
-            vmConfig = null
-            vmConfigJson = null
-            _vmState.value = VmState.Stopped
-        }
+        VmManager.stop(activeVmId())
     }
 
-    private fun calculateSparseDiskSize(): Long {
-        // Create a sparse file with 95% of the total size for storage ballooning.
-        val statFs = StatFs(context.filesDir.absolutePath)
-        val hostSize = statFs.totalBytes
-        return roundUp(hostSize * GUEST_SPARSE_DISK_SIZE_PERCENTAGE / 100)
-    }
-
-    private fun truncateDiskIfNecessary(image: InstalledImage) {
-        val curSize = image.getApparentSize()
-        val physicalSize = image.getPhysicalSize()
-
-        val expectedSize = calculateSparseDiskSize()
-        Log.d(
-            TAG,
-            "rootfs apparent size=$curSize, physical size=$physicalSize, expectedSize=$expectedSize",
-        )
-
-        if (curSize != expectedSize) {
-            try {
-                image.truncate(expectedSize)
-            } catch (e: IOException) {
-                throw RuntimeException("Failed to truncate a disk", e)
-            }
-        }
-    }
-
-    private const val GUEST_SPARSE_DISK_SIZE_PERCENTAGE = 95
-
-    private val IS_EMULATOR: Boolean =
-        {
-            val deviceName = SystemProperties.get("ro.product.vendor.device", "")
-            val cuttlefish = deviceName.startsWith("vsoc_")
-            val goldfish = deviceName.startsWith("emu64")
-
-            cuttlefish || goldfish
-        }()
+    private fun activeVmId(): String =
+        VmManager.activeVmId.value ?: VmRegistry.LEGACY_VM_ID
 }

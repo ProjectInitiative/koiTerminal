@@ -307,7 +307,7 @@ internal data class ConfigJson(
         fun from(context: Context, jsonPath: Path): ConfigJson {
             try {
                 FileReader(jsonPath.toFile()).use { fileReader ->
-                    val content = replaceKeywords(fileReader, context)
+                    val content = replaceKeywords(fileReader, context, jsonPath)
                     return Gson().fromJson(content, ConfigJson::class.java)
                 }
             } catch (e: Exception) {
@@ -316,10 +316,15 @@ internal data class ConfigJson(
         }
 
         @Throws(IOException::class)
-        private fun replaceKeywords(r: Reader, context: Context): String {
+        private fun replaceKeywords(r: Reader, context: Context, jsonPath: Path): String {
+            // The payload dir is the install slot that contains vm_config.json;
+            // fall back to the legacy default dir when the path has no parent.
+            val payloadDir =
+                jsonPath.parent?.toString()
+                    ?: InstalledImage.getDefault(context).installDir.toString()
             val rules: Map<String, String> =
                 mapOf(
-                    "\\\$PAYLOAD_DIR" to InstalledImage.getDefault(context).installDir.toString(),
+                    "\\\$PAYLOAD_DIR" to payloadDir,
                     "\\\$PACKAGE_NAME" to context.getPackageName(),
                     "\\\$APP_DATA_DIR" to context.getDataDir().toString(),
                 )
