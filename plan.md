@@ -4,7 +4,7 @@ Full architecture + contracts: **docs/MULTI_VM_PLAN.md** (read it first).
 
 ## Phase status
 
-- [ ] Phase A — registry + storage (`VmRegistry`, `InstalledImage` param, legacy migration)
+- [x] Phase A — registry + storage (`VmRegistry`, `InstalledImage` param, legacy migration)
 - [ ] Phase B — VmManager (`VmInstance`, per-vmId state flows, VmService scoping)
 - [ ] Phase C — import & installer (SAF import dialog, `ImageArchive.fromPath`, install queue)
 - [ ] Phase D — UI (VM list idle screen, per-VM tabs, per-VM config editor)

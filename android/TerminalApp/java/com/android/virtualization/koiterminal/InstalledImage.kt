@@ -292,10 +292,26 @@ public class InstalledImage private constructor(val installDir: Path) {
         const val RESIZE_STEP_BYTES: Long = 4 shl 20 // 4 MiB
         const val RELEASE_YEAR: Int = 2025
 
-        /** Returns InstalledImage for a given app context */
+        /**
+         * Returns InstalledImage for a given app context.
+         *
+         * @deprecated Single-VM legacy path. Use [forSlot] with a registry VM id
+         * instead (docs/MULTI_VM_PLAN.md).
+         */
+        @Deprecated("Use forSlot(context, vmId) for multi-VM support")
         fun getDefault(context: Context): InstalledImage {
             val installDir = context.getFilesDir().toPath().resolve(INSTALL_DIRNAME)
             return InstalledImage(installDir)
+        }
+
+        /** Returns InstalledImage for a registry VM slot (`files/vms/<vmId>`). */
+        fun forSlot(context: Context, vmId: String): InstalledImage {
+            return InstalledImage(
+                com.android.virtualization.koiterminal.new2.core.VmRegistry.installDir(
+                    context,
+                    vmId,
+                )
+            )
         }
 
         @Throws(IOException::class)
