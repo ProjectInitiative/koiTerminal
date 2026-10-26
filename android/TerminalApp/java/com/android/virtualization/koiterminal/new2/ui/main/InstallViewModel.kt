@@ -17,7 +17,9 @@ package com.android.virtualization.koiterminal.new2.ui.main
 
 import android.app.Activity
 import android.content.Intent
+import android.app.Application
 import android.provider.Settings
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.android.virtualization.koiterminal.BetterBugLauncher
@@ -25,6 +27,7 @@ import com.android.virtualization.koiterminal.ImageArchive
 import com.android.virtualization.koiterminal.R
 import com.android.virtualization.koiterminal.new2.core.InstallState
 import com.android.virtualization.koiterminal.new2.core.Installer
+import com.android.virtualization.koiterminal.new2.core.VmRegistry
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -40,7 +43,7 @@ import kotlinx.coroutines.launch
  * It manages the installation state and provides actions to control the installation process. It
  * also handles installation-related errors and provides events for the UI to show snackbars.
  */
-class InstallViewModel : ViewModel() {
+class InstallViewModel(application: Application) : AndroidViewModel(application) {
     /** Current state of the installation process. */
     val installState: StateFlow<InstallState> = Installer.installState
 
@@ -65,13 +68,15 @@ class InstallViewModel : ViewModel() {
 
     /**
      * Automatically triggers installation if a local image is available and the VM is not yet
-     * installed.
+     * installed. Skipped entirely when registry VMs exist — the multi-VM manager owns installs
+     * then, and re-extracting the legacy /sdcard archive into files/linux would fight the
+     * migration (multi-VM plan Phase C/D).
      */
     private fun autoInstallIfNecessary() {
         if (autoInstall) {
             viewModelScope.launch {
                 installState.collect { state ->
-                    when (state) {
+                    if (VmRegistry.list(getApplication()).isNotEmpty()) return@collect                    when (state) {
                         is InstallState.NotInstalled -> installVm()
                         is InstallState.NeedsUpgrade -> upgradeVm()
                         else -> {}

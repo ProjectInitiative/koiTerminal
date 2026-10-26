@@ -145,16 +145,11 @@ object VmRegistry {
                     createdAt = System.currentTimeMillis(),
                 )
             val slot = installDir(context, entry.id)
-            Files.createDirectories(slot)
-            Files.walk(legacyDir).use { walk ->
-                walk
-                    .filter { Files.isRegularFile(it) }
-                    .forEach { src ->
-                        val dest = slot.resolve(legacyDir.relativize(src).toString())
-                        Files.createDirectories(dest.parent)
-                        Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING)
-                    }
-            }
+            // Atomic rename of the legacy dir into the slot: instant, and
+            // preserves the sparse root_part (a dense copy would materialize
+            // 400+ GiB of zeros and eventually hit ENOSPC; hard links are
+            // blocked by the app-data security policy on modern Android).
+            Files.move(legacyDir, slot)
             writeRegistryLocked(context, listOf(entry))
             Log.d(TAG, "Migrated legacy install to slot ${entry.id} ($slot)")
             return entry
