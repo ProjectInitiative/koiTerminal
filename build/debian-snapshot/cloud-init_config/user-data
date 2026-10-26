@@ -1,0 +1,37 @@
+#cloud-config
+
+# cloud-init boots modules in predefined order as follows:
+#   - network
+#   - write_files (`defer` can be specified to run this later)
+#   - users
+#   - bootcmd
+#   - packages
+#   - runcmd
+
+users:
+  - default
+  - name: droid
+    gecos: Default user for Terminal App
+    lock_passwd: false
+    no_user_group: true
+    groups: sudo, video, renderer
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /usr/bin/bash
+    plain_text_passwd: droid
+    uid: 1000
+
+# Write files at /home/droid here to set ownership
+write_files:
+  - content: |
+      # Show title of current running command
+      trap 'echo -ne "\e]0;$BASH_COMMAND\007"' DEBUG
+    path: /home/droid/.bash_aliases
+    permissions: '0644'
+    owner: droid:users
+    defer: true
+
+runcmd:
+  - mkdir -p /mnt/cidata
+  - mount LABEL=cidata /mnt/cidata || mount /dev/vdb /mnt/cidata || true
+  - sh /mnt/cidata/init.sh 2>&1 | tee /var/log/koi-init.log
+  - umount /mnt/cidata || true

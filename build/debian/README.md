@@ -60,6 +60,11 @@ tar czf images.tar.gz --directory images .
 Modifications are the same as building from scratch: disable virtiofs folder sharing, share ttyd CA, enable serial console.
 
 > [!IMPORTANT]
+> The snapshot `user-data`/`meta-data` also differ from the Google original:
+> a distinct `instance-id` (so re-imports re-run per-instance modules instead
+> of inheriting stale cloud-init state) and a label-based `mount` in `runcmd`
+> (the hardcoded `/dev/vdb` breaks if block device order differs).
+>
 > The snapshot `init.sh` deliberately skips the `mnt-internal`/`mnt-shared`
 > virtiofs units (koiTerminal uses `sharedPath: []`) and enables the remaining
 > services per-unit with failures tolerated — a single failing unit used to
