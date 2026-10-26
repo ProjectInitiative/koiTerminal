@@ -123,5 +123,7 @@ object VmController {
     }
 
     private fun activeVmId(): String =
-        VmManager.activeVmId.value ?: VmRegistry.LEGACY_VM_ID
+        VmManager.activeVmId.value
+            ?: VmRegistry.list(context).firstOrNull()?.id
+            ?: VmRegistry.LEGACY_VM_ID
 }

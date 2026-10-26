@@ -26,15 +26,22 @@ import com.android.virtualization.koiterminal.InstalledImage
 import com.android.virtualization.koiterminal.new2.util.LoggingMutableStateFlow
 import java.io.IOException
 import java.io.InputStream
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -85,6 +92,7 @@ private class InstallStateFlow(private val original: MutableStateFlow<InstallSta
 }
 
 object Installer {
+    private const val TAG = "Installer"
     private const val ESTIMATED_DOWNLOAD_SIZE = 700L * 1024 * 1024
 
     private lateinit var context: Context
@@ -117,6 +125,8 @@ object Installer {
         networkMonitor = NetworkMonitor(context)
 
         repositoryScope.launch { checkInstallStatus() }
+        // Seed per-VM install states from the registry (see multi-VM plan, Phase C).
+        repositoryScope.launch { seedVmInstallStates() }
     }
 
     fun install() {
@@ -225,6 +235,151 @@ object Installer {
     fun setWifiOnly(enabled: Boolean) {
         _wifiOnly.value = enabled
         synchronized(this) { (this as Object).notifyAll() }
+    }
+
+    // --- Per-VM (imported) installs (multi-VM plan Phase C) ---
+
+    /** One queued per-VM install: extract [archive] into the VM's registry slot. */
+    internal data class VmInstallRequest(
+        val vmId: String,
+        val archive: ImageArchive,
+        /** Provenance sha256 of the imported archive file, when known. */
+        val archiveSha256: String? = null,
+        /** App-private import copy to delete after a successful install. */
+        val sourceFile: Path? = null,
+    )
+
+    private val vmInstallQueue = Channel<VmInstallRequest>(Channel.UNLIMITED)
+    private val vmInstallJobs = ConcurrentHashMap<String, Job>()
+
+    @Volatile
+    private var vmInstallWorkerStarted = false
+
+    /** Per-VM install states: vmId -> [InstallState]. */
+    private val _vmInstallStates = MutableStateFlow<Map<String, InstallState>>(emptyMap())
+    val vmInstallStates: StateFlow<Map<String, InstallState>> = _vmInstallStates.asStateFlow()
+
+    private val perVmInstallStateFlows = ConcurrentHashMap<String, StateFlow<InstallState>>()
+
+    /** Per-VM install state flow, created on demand (defaults to [InstallState.Checking]). */
+    fun vmInstallState(vmId: String): StateFlow<InstallState> {
+        return perVmInstallStateFlows.getOrPut(vmId) {
+            _vmInstallStates
+                .map { it[vmId] ?: InstallState.Checking }
+                .stateIn(repositoryScope, SharingStarted.Eagerly, InstallState.Checking)
+        }
+    }
+
+    /**
+     * Enqueues an install of [archive] into the slot of [vmId]. Installs are
+     * serialized (extraction is I/O bound); the foreground service is started
+     * up-front like the legacy [install] path.
+     */
+    internal fun enqueueVmInstall(
+        vmId: String,
+        archive: ImageArchive,
+        archiveSha256: String? = null,
+        sourceFile: Path? = null,
+    ) {
+        ensureVmInstallWorker()
+        val intent = Intent(context, VmService::class.java)
+        context.startForegroundService(intent)
+        vmInstallQueue.trySend(VmInstallRequest(vmId, archive, archiveSha256, sourceFile))
+    }
+
+    /** Cancels a queued or running per-VM install. */
+    fun cancelVmInstall(vmId: String) {
+        vmInstallJobs[vmId]?.cancel()
+    }
+
+    private fun ensureVmInstallWorker() {
+        if (vmInstallWorkerStarted) return
+        synchronized(this) {
+            if (vmInstallWorkerStarted) return
+            vmInstallWorkerStarted = true
+            // Single consumer => installs are serialized.
+            repositoryScope.launch {
+                for (request in vmInstallQueue) {
+                    val job = repositoryScope.launch { installVmArchive(request) }
+                    vmInstallJobs[request.vmId] = job
+                    job.join()
+                    vmInstallJobs.remove(request.vmId, job)
+                }
+            }
+        }
+    }
+
+    private suspend fun installVmArchive(request: VmInstallRequest) {
+        val vmId = request.vmId
+        try {
+            val image = InstalledImage.forSlot(context, vmId)
+            val progressFlow = MutableStateFlow(0L)
+            val totalSize =
+                runCatching { request.archive.getSize() }
+                    .onFailure { Log.w(TAG, "Cannot determine archive size for VM $vmId", it) }
+                    .getOrDefault(0L)
+            _vmInstallStates.value =
+                _vmInstallStates.value +
+                    (vmId to
+                        InstallState.Installing(
+                            totalSize,
+                            progressFlow.asStateFlow(),
+                            networkMonitor?.isWifiConnected?.value ?: false,
+                        ))
+            request.archive.installTo(context, image.installDir, null).collect { bytesRead ->
+                progressFlow.value = bytesRead
+            }
+            if (request.archiveSha256 != null) {
+                updateEntryArchiveSha256(vmId, request.archiveSha256)
+            }
+            // The extracted image now lives in the VM slot; drop the import copy.
+            request.sourceFile?.let { runCatching { Files.deleteIfExists(it) } }
+            _vmInstallStates.value = _vmInstallStates.value + (vmId to InstallState.Installed)
+            Log.i(TAG, "Install of VM $vmId completed")
+        } catch (e: CancellationException) {
+            _vmInstallStates.value = _vmInstallStates.value + (vmId to InstallState.NotInstalled(0L))
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Install of VM $vmId failed", e)
+            val cause =
+                if (
+                    e is IOException &&
+                        e.message?.contains("No space left on device") == true
+                ) {
+                    InstallState.ErrorCause.InstallFailedNoSpace
+                } else {
+                    InstallState.ErrorCause.InstallFailedUnknown
+                }
+            _vmInstallStates.value = _vmInstallStates.value + (vmId to InstallState.Error(e, cause))
+        }
+    }
+
+    private fun updateEntryArchiveSha256(vmId: String, sha256: String) {
+        try {
+            VmRegistry.list(context)
+                .firstOrNull { it.id == vmId }
+                ?.let { VmRegistry.add(context, it.copy(archiveSha256 = sha256)) }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to record archive sha256 for VM $vmId", e)
+        }
+    }
+
+    private suspend fun seedVmInstallStates() {
+        try {
+            for (entry in VmRegistry.list(context)) {
+                val installed = InstalledImage.forSlot(context, entry.id).isInstalled()
+                setVmInstallState(
+                    entry.id,
+                    if (installed) InstallState.Installed else InstallState.NotInstalled(0L),
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to seed per-VM install states", e)
+        }
+    }
+
+    private fun setVmInstallState(vmId: String, state: InstallState) {
+        _vmInstallStates.value = _vmInstallStates.value + (vmId to state)
     }
 
     fun setShowIfError(enabled: Boolean) {

@@ -276,6 +276,17 @@ internal class ImageArchive {
         }
 
         /**
+         * Creates ImageArchive from an app-private file path, e.g. a SAF
+         * import copied to `files/imports/<uuid>.tar.gz` by the ImportDialog.
+         *
+         * As with [fromSdCard], an optional `/sdcard/linux/cidata.iso` is used
+         * to override the archive's cidata when it exists.
+         */
+        fun fromPath(path: Path): ImageArchive {
+            return ImageArchive(path, getSdcardPathForTesting().resolve(CIDATA_NAME))
+        }
+
+        /**
          * Creates ImageArchive which is located in the sdcard. This archive is for testing only.
          */
         fun fromSdCard(): ImageArchive {

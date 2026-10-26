@@ -17,6 +17,7 @@ package com.android.virtualization.koiterminal.new2.ui
 
 import android.app.Activity
 import android.provider.Settings
+import android.text.format.Formatter
 import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInHorizontally
@@ -40,9 +41,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
@@ -69,6 +72,7 @@ import com.android.virtualization.koiterminal.BetterBugLauncher
 import com.android.virtualization.koiterminal.R
 import com.android.virtualization.koiterminal.new2.core.InstallState
 import com.android.virtualization.koiterminal.new2.core.Installer
+import com.android.virtualization.koiterminal.new2.core.VmRegistry
 import com.android.virtualization.koiterminal.new2.ui.main.DisplayState
 import com.android.virtualization.koiterminal.new2.ui.main.MainUiState
 import com.android.virtualization.koiterminal.new2.ui.main.MainViewModel
@@ -79,6 +83,7 @@ import kotlinx.coroutines.delay
 fun MainScreen(viewModel: MainViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val installState by Installer.installState.collectAsStateWithLifecycle()
+    val vmInstallStates by Installer.vmInstallStates.collectAsStateWithLifecycle()
     val showSettings by viewModel.showSettings.collectAsStateWithLifecycle()
     val showIfInstallerError by Installer.showIfError.collectAsStateWithLifecycle()
     val showIfError by viewModel.showIfError.collectAsStateWithLifecycle()
@@ -94,6 +99,11 @@ fun MainScreen(viewModel: MainViewModel) {
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val activity = context as Activity
+    // Whether any registry VM exists (imported or migrated legacy). Used to
+    // reach the manager (idle) screen even when the legacy install state is
+    // not "Installed" (e.g. fresh users who only import an archive).
+    val hasRegistryVms = remember { VmRegistry.list(context).isNotEmpty() }
+    val hasVmSlots = hasRegistryVms || vmInstallStates.isNotEmpty()
 
     PermissionChecker(viewModel, snackbarHostState)
 
@@ -126,7 +136,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 val uiStateNow = uiState
                 if (!hasMandatoryPermissions) {
                     PermissionScreen(viewModel = viewModel)
-                } else if (installState !is InstallState.Installed) {
+                } else if (installState !is InstallState.Installed && !hasVmSlots) {
                     InstallScreen(snackbarHostState = snackbarHostState)
                 } else if (installStateNow is InstallState.Error && showIfInstallerError) {
                     ErrorScreen(
@@ -196,15 +206,32 @@ fun MainScreen(viewModel: MainViewModel) {
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        var showImportDialog by remember {
+                                            mutableStateOf(false)
+                                        }
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                        ) {
                                             Button(onClick = { viewModel.startVm() }) {
                                                 Text("Start VM")
+                                            }
+                                            Button(
+                                                onClick = { showImportDialog = true },
+                                                modifier = Modifier.padding(top = 8.dp),
+                                            ) {
+                                                Text("+ Add VM")
+                                            }
+                                            for ((vmId, vmInstallState) in vmInstallStates) {
+                                                VmInstallProgressCard(vmId, vmInstallState)
                                             }
                                             Text(
                                                 text = "Auto-boot is disabled (Settings → Advanced)",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 modifier = Modifier.padding(top = 8.dp),
                                             )
+                                        }
+                                        if (showImportDialog) {
+                                            ImportDialog(onDismiss = { showImportDialog = false })
                                         }
                                     }
                                 }
@@ -242,6 +269,44 @@ fun SplashScreen() {
 fun BootingScreen() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         CircularProgressIndicator()
+    }
+}
+
+/** Compact progress card for one active per-VM (imported) install. */
+@Composable
+private fun VmInstallProgressCard(vmId: String, installState: InstallState) {
+    val progressFlow =
+        when (installState) {
+            is InstallState.Installing -> installState.progress
+            is InstallState.InstallSuspended -> installState.progress
+            else -> return
+        }
+    val context = LocalContext.current
+    val currentBytes by progressFlow.collectAsStateWithLifecycle()
+    val totalBytes = installState.getTotalImageSize()
+    val vmName =
+        remember(vmId) { VmRegistry.list(context).firstOrNull { it.id == vmId }?.name ?: vmId }
+    Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = "Installing \"$vmName\"…",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            LinearProgressIndicator(
+                progress = {
+                    if (totalBytes > 0) (currentBytes.toFloat() / totalBytes).coerceIn(0f, 1f)
+                    else 0f
+                },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(4.dp),
+            )
+            Text(
+                text =
+                    "${Formatter.formatFileSize(context, currentBytes)} / " +
+                        Formatter.formatFileSize(context, totalBytes),
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
     }
 }
 
