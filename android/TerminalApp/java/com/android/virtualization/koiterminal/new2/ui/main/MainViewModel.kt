@@ -35,6 +35,7 @@ import com.android.virtualization.koiterminal.new2.core.TerminalSessionRepositor
 import com.android.virtualization.koiterminal.new2.core.VmController
 import com.android.virtualization.koiterminal.new2.core.VmManager
 import com.android.virtualization.koiterminal.new2.core.VmRegistry
+import com.android.virtualization.koiterminal.new2.core.VmSettings
 import com.android.virtualization.koiterminal.new2.ui.main.SettingsViewModel
 import com.android.virtualization.koiterminal.new2.core.VmState
 import com.android.virtualization.koiterminal.new2.ui.MainActivity
@@ -272,15 +273,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * The VM auto-boot should start: the `auto_boot_vm_id` pref when it is a
-     * registered VM, else the first registry entry, else the legacy id
-     * (multi-VM plan Phase 4).
+     * The VMs auto-boot should start, in registry order: registered VMs with
+     * a per-VM `autoBoot` flag. When no per-VM flag is set anywhere, falls
+     * back to the `auto_boot_vm_id` pref (default: first registry entry) so
+     * pre-per-VM behavior is preserved.
      */
-    private fun autoBootVmId(): String {
+    private fun autoBootVmIds(): List<String> {
         val context = getApplication<Application>()
-        val prefs =
-            context.getSharedPreferences(SettingsViewModel.PREFS_NAME, Context.MODE_PRIVATE)
-        return SettingsViewModel.autoBootVmIdPref(prefs, context)
+        val marked =
+            VmRegistry.list(context).filter { VmSettings.autoBoot(context, it.id) }.map { it.id }
+        if (marked.isNotEmpty()) return marked
+        return listOf(SettingsViewModel.autoBootVmIdPref(context.getSharedPreferences(SettingsViewModel.PREFS_NAME, Context.MODE_PRIVATE), context))
     }
 
     fun onPermissionGranted() {
@@ -405,11 +408,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                                 // Once installed, start observing UI state and trigger VM startup
                                 // whenever it returns to a Ready state (only if auto-boot is
-                                // enabled in Settings; otherwise the user presses Start). The VM
-                                // to boot is `auto_boot_vm_id` (default: first registry entry).
+                                // enabled in Settings; otherwise the user presses Start). The VMs
+                                // to boot are the per-VM autoBoot-marked entries (fallback:
+                                // `auto_boot_vm_id`, default: first registry entry). With the
+                                // single-VM-at-a-time policy, the first one starts; the rest
+                                // are skipped (startable manually from the VM list).
                                 uiState.collect { state ->
                                     if (state is MainUiState.Ready && isAutoBootEnabled()) {
-                                        startVm(autoBootVmId())
+                                        val candidate = autoBootVmIds().firstOrNull { vmId ->
+                                            VmManager.state(vmId).value is VmState.Ready
+                                        }
+                                        if (candidate != null) {
+                                            startVm(candidate)
+                                        }
                                     }
                                 }
                             } else {

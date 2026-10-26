@@ -42,6 +42,8 @@ data class VmPrefs(
     val socks5LoopbackOk: Boolean? = null,
     val graphicsAcceleration: String? = null,
     val savedPorts: List<Int> = emptyList(),
+    /** Whether this VM is auto-booted on app open (global auto-boot must also be on). */
+    val autoBoot: Boolean? = null,
 )
 
 /**
@@ -155,6 +157,13 @@ object VmSettings {
         val perVm = read(context, vmId)?.graphicsAcceleration
         if (perVm != null) return GraphicsManager.AccelerationType.valueOf(perVm)
         return GraphicsManager.getInstance(context).accelerationType
+    }
+
+    /** Per-VM auto-boot flag; defaults to false (registry order breaks ties). */
+    fun autoBoot(context: Context, vmId: String): Boolean = read(context, vmId)?.autoBoot ?: false
+
+    fun setAutoBoot(context: Context, vmId: String, enabled: Boolean) {
+        write(context, vmId) { it.copy(autoBoot = enabled) }
     }
 
     /** Per-VM gfxstream decision; mirrors [GraphicsManager.isGfxstreamEnabled] when falling back. */

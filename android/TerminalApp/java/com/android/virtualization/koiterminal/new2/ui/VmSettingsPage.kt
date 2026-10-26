@@ -44,6 +44,7 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.NearbyError
 import androidx.compose.material.icons.filled.OfflineBolt
 import androidx.compose.material.icons.filled.Pin
@@ -156,6 +157,7 @@ fun VmSettingsPage(vmId: String, onClose: () -> Unit) {
         remember(vmId) { mutableStateOf(VmSettings.socks5LoopbackOkPref(context, vmId)) }
     var graphicsAcceleration by
         remember(vmId) { mutableStateOf(VmSettings.graphicsAccelerationPref(context, vmId)) }
+    var autoBoot by remember(vmId) { mutableStateOf(VmSettings.autoBoot(context, vmId)) }
 
     var showMemoryDialog by remember { mutableStateOf(false) }
     var showGraphicsDialog by remember { mutableStateOf(false) }
@@ -377,6 +379,31 @@ fun VmSettingsPage(vmId: String, onClose: () -> Unit) {
                     .verticalScroll(rememberScrollState())
                     .fillMaxWidth()
         ) {
+            SectionHeader(stringResource(R.string.settings_vm_auto_boot_title))
+            ListItem(
+                headlineContent = {
+                    Text(stringResource(R.string.settings_vm_auto_boot_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.settings_vm_auto_boot_desc))
+                },
+                leadingContent = {
+                    Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null)
+                },
+                trailingContent = {
+                    Switch(checked = autoBoot, onCheckedChange = null)
+                },
+                modifier =
+                    Modifier.toggleable(
+                        value = autoBoot,
+                        role = Role.Switch,
+                    ) { enabled ->
+                        VmSettings.setAutoBoot(context, vmId, enabled)
+                        autoBoot = enabled
+                    },
+            )
+            HorizontalDivider()
+
             SectionHeader(stringResource(R.string.settings_advanced_memory_title))
             ListItem(
                 headlineContent = { Text(formatMemorySize(memoryMb)) },
