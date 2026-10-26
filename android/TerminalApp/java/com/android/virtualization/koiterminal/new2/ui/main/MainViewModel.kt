@@ -325,7 +325,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         Log.i("MainViewModel", "MainViewModel.onCleared()")
         super.onCleared()
-        VmController.stop()
+        // Intentionally do NOT stop the VM here: closing the app/activity must
+        // leave the VM running in the background (VmService is a foreground
+        // service and keeps the client process — and thus the crosvm client —
+        // alive). The VM stops only via the explicit Stop controls, or when
+        // the guest shuts itself down. Caveat: if the OS kills the whole
+        // process despite the foreground service, AVF tears the VM down with
+        // its client; reconnecting to a running VM after process death is
+        // future work.
     }
 
     init {
@@ -439,11 +446,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     launch {
+                        // NOTE: an empty session list no longer stops the VM —
+                        // the VM keeps running (headless) when the user closes
+                        // all tabs or the app; the VM list idle screen and the
+                        // serial-tab auto-add allow re-attaching. Stopping is
+                        // explicit (Stop button / Settings shutdown / guest
+                        // poweroff → the VM-stop path resets the UI).
                         TerminalSessionRepository.sessions.collect { sessions ->
-                            if (sessions.isEmpty()) {
-                                Log.i("MainViewModel", "MainViewModel.launch {if (sessions.isEmpty())}")
-                                stopVm()
-                            }
+                            Log.d("MainViewModel", "sessions.size=${sessions.size}")
                         }
                     }
                 }
