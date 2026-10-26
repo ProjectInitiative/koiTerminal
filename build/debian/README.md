@@ -59,6 +59,13 @@ tar czf images.tar.gz --directory images .
 
 Modifications are the same as building from scratch: disable virtiofs folder sharing, share ttyd CA, enable serial console.
 
+> [!IMPORTANT]
+> The snapshot `init.sh` deliberately skips the `mnt-internal`/`mnt-shared`
+> virtiofs units (koiTerminal uses `sharedPath: []`) and enables the remaining
+> services per-unit with failures tolerated — a single failing unit used to
+> abort the script under `set -e`, which made cloud-init report a fatal error
+> and left the ttyd/vsock services disabled (endless "Connecting to terminal").
+
 # An overview of how the original app with the Debian image works
 The terminal uses an internal (for now) API to create a VM, passing a bunch of file and pipe handles and a bunch of configs to `crosvm`. Crosvm launches the VM either with direct boot (kernel + initrd) or bootloader (sudh as u-boot).
 
