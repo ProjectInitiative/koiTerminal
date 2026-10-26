@@ -46,6 +46,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.android.virtualization.koiterminal.ConfigJson
 import com.android.virtualization.koiterminal.InstalledImage
+import com.android.virtualization.koiterminal.new2.core.VmRegistry
 import com.google.gson.JsonParser
 import java.nio.file.Files
 import java.nio.file.Path
@@ -61,9 +62,12 @@ private const val RESTORE_HINT = "The VM reads this file on every start; stop an
  * Raw editor for the installed image's vm_config.json. Changes are validated
  * (JSON parse + ConfigJson model check) before being written; the previous
  * version is kept as vm_config.json.bak and can be restored.
+ *
+ * When [vmId] is non-null the config path is resolved via
+ * [VmRegistry.installDir]; null keeps the legacy default image.
  */
 @Composable
-fun VmConfigEditorPage(onCloseSettings: () -> Unit) {
+fun VmConfigEditorPage(vmId: String?, onCloseSettings: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -74,11 +78,15 @@ fun VmConfigEditorPage(onCloseSettings: () -> Unit) {
     var statusIsError by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(vmId) {
         withContext(Dispatchers.IO) {
             try {
-                val image = InstalledImage.getDefault(context)
-                val path = image.configPath
+                val path =
+                    if (vmId != null) {
+                        VmRegistry.installDir(context, vmId).resolve("vm_config.json")
+                    } else {
+                        InstalledImage.getDefault(context).configPath
+                    }
                 if (!Files.exists(path)) {
                     status = "No installed image found."
                     statusIsError = true

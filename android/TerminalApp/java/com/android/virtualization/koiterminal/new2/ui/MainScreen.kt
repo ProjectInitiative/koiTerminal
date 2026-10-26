@@ -99,11 +99,15 @@ fun MainScreen(viewModel: MainViewModel) {
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val activity = context as Activity
-    // Whether any registry VM exists (imported or migrated legacy). Used to
-    // reach the manager (idle) screen even when the legacy install state is
-    // not "Installed" (e.g. fresh users who only import an archive).
-    val hasRegistryVms = remember { VmRegistry.list(context).isNotEmpty() }
-    val hasVmSlots = hasRegistryVms || vmInstallStates.isNotEmpty()
+    // Registry VMs (imported or migrated legacy); refreshed after imports,
+    // renames and uninstalls. Used to reach the manager (idle) screen even
+    // when the legacy install state is not "Installed" (e.g. fresh users who
+    // only import an archive).
+    var vmEntries by remember { mutableStateOf(VmRegistry.list(context)) }
+    val refreshVmEntries = { vmEntries = VmRegistry.list(context) }
+    val hasVmSlots = vmEntries.isNotEmpty() || vmInstallStates.isNotEmpty() || installState is InstallState.Installed
+    // VM whose vm_config.json is being edited (from a VM card's overflow menu).
+    var editingVmId by remember { mutableStateOf<String?>(null) }
 
     PermissionChecker(viewModel, snackbarHostState)
 
@@ -169,9 +173,12 @@ fun MainScreen(viewModel: MainViewModel) {
                                 }
                             } else {
                                 // Auto-boot disabled in Settings: rest state until the
-                                // user presses Start. Render the same chrome as the running
-                                // screen (tab bar + settings) so settings stay reachable.
+                                // user presses Start. The idle screen is the VM list: one
+                                // card per registered VM (multi-VM plan Phase 4). Render the
+                                // same chrome as the running screen (tab bar + settings) so
+                                // settings stay reachable.
                                 val idleTabs by viewModel.tabs.collectAsStateWithLifecycle()
+                                val vmNames = vmEntries.associate { it.id to it.name }
                                 Column(modifier = Modifier.fillMaxSize()) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -187,6 +194,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                                 onTabClosed = { viewModel.closeTab(it) },
                                                 onAddTab = { viewModel.addTab() },
                                                 onAddSerialTab = { viewModel.addSerialTab() },
+                                                vmNames = vmNames,
                                             )
                                         }
                                         ToastIconButton(
@@ -204,25 +212,31 @@ fun MainScreen(viewModel: MainViewModel) {
                                     }
                                     Box(
                                         modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center,
+                                        contentAlignment = Alignment.TopCenter,
                                     ) {
                                         var showImportDialog by remember {
                                             mutableStateOf(false)
                                         }
                                         Column(
                                             horizontalAlignment = Alignment.CenterHorizontally,
+                                            modifier = Modifier.fillMaxSize(),
                                         ) {
-                                            Button(onClick = { viewModel.startVm() }) {
-                                                Text("Start VM")
+                                            VmListContent(
+                                                entries = vmEntries,
+                                                vmInstallStates = vmInstallStates,
+                                                onStartVm = { viewModel.startVm(it) },
+                                                onStopVm = { viewModel.stopVm(it) },
+                                                onEditConfig = { editingVmId = it },
+                                                onChanged = refreshVmEntries,
+                                            )
+                                            for ((vmId, vmInstallState) in vmInstallStates) {
+                                                VmInstallProgressCard(vmId, vmInstallState)
                                             }
                                             Button(
                                                 onClick = { showImportDialog = true },
                                                 modifier = Modifier.padding(top = 8.dp),
                                             ) {
                                                 Text("+ Add VM")
-                                            }
-                                            for ((vmId, vmInstallState) in vmInstallStates) {
-                                                VmInstallProgressCard(vmId, vmInstallState)
                                             }
                                             Text(
                                                 text = "Auto-boot is disabled (Settings → Advanced)",
@@ -231,7 +245,12 @@ fun MainScreen(viewModel: MainViewModel) {
                                             )
                                         }
                                         if (showImportDialog) {
-                                            ImportDialog(onDismiss = { showImportDialog = false })
+                                            ImportDialog(
+                                                onDismiss = {
+                                                    showImportDialog = false
+                                                    refreshVmEntries()
+                                                }
+                                            )
                                         }
                                     }
                                 }
@@ -253,6 +272,24 @@ fun MainScreen(viewModel: MainViewModel) {
                 exit = slideOutHorizontally(targetOffsetX = { it }),
             ) {
                 SettingsScreen(onBack = { viewModel.setShowSettings(false) })
+            }
+
+            // Per-VM config editor (VM card overflow → "Edit config"); overlays
+            // the idle screen for the selected VM's vm_config.json.
+            editingVmId?.let { vmId ->
+                key(vmId) {
+                    Box(
+                        modifier =
+                            Modifier.fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background)
+                                .safeDrawingPadding()
+                    ) {
+                        VmConfigEditorPage(
+                            vmId = vmId,
+                            onCloseSettings = { editingVmId = null },
+                        )
+                    }
+                }
             }
         }
     }
@@ -313,6 +350,13 @@ private fun VmInstallProgressCard(vmId: String, installState: InstallState) {
 @Composable
 fun RunningScreen(state: MainUiState.Running, viewModel: MainViewModel) {
     val tabs by viewModel.tabs.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val runningVmNames =
+        remember(tabs.map { it.vmId }.distinct()) {
+            VmRegistry.list(context)
+                .associate { it.id to it.name }
+                .filterKeys { id -> tabs.any { it.vmId == id } }
+        }
     val selectedTabId by viewModel.selectedTabId.collectAsStateWithLifecycle()
     val displayState by viewModel.displayState.collectAsStateWithLifecycle()
     val isFullscreen by viewModel.isFullscreen.collectAsStateWithLifecycle()
@@ -332,6 +376,7 @@ fun RunningScreen(state: MainUiState.Running, viewModel: MainViewModel) {
                         onTabClosed = { viewModel.closeTab(it) },
                         onAddTab = { viewModel.addTab() },
                         onAddSerialTab = { viewModel.addSerialTab() },
+                        vmNames = runningVmNames,
                     )
                 }
                 DisplayController(viewModel = viewModel)

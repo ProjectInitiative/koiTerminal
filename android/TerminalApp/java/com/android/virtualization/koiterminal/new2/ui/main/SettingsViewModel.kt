@@ -23,6 +23,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.android.virtualization.koiterminal.new2.core.Installer
 import com.android.virtualization.koiterminal.new2.core.VmController
+import com.android.virtualization.koiterminal.new2.core.VmRegistry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -77,6 +78,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _autoBoot = MutableStateFlow(autoBootPref(sharedPref))
     val autoBoot: StateFlow<Boolean> = _autoBoot.asStateFlow()
 
+    /** VM id auto-boot should start; default is the first registry entry. */
+    private val _autoBootVmId = MutableStateFlow(autoBootVmIdPref(sharedPref, application))
+    val autoBootVmId: StateFlow<String> = _autoBootVmId.asStateFlow()
+
 
     private val sharedPrefListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -105,6 +110,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 }
                 KEY_AUTO_BOOT -> {
                     _autoBoot.value = autoBootPref(sharedPref)
+                }
+                KEY_AUTO_BOOT_VM_ID -> {
+                    _autoBootVmId.value = autoBootVmIdPref(sharedPref, application)
                 }
             }
         }
@@ -178,6 +186,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /** Sets which VM auto-boot starts; should be a registered VM id. */
+    fun setAutoBootVmId(vmId: String) {
+        if (vmId != _autoBootVmId.value) {
+            sharedPref.edit().putString(KEY_AUTO_BOOT_VM_ID, vmId).apply()
+            _autoBootVmId.value = vmId
+        }
+    }
+
     fun setShowKeepAwakeDialog(show: Boolean) {
         _showKeepAwakeDialog.value = show
     }
@@ -225,6 +241,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         internal const val KEY_SOCKS5_LOOPBACK_OK = "socks5_loopback_ok"
         internal const val KEY_SHARE_TIME = "share_time"
         internal const val KEY_AUTO_BOOT = "auto_boot"
+        internal const val KEY_AUTO_BOOT_VM_ID = "auto_boot_vm_id"
         const val DEFAULT_SOCKS5_DELEGATED = 9050 // Orbot
         fun networkConnectionPref(sharedPref: SharedPreferences): NetworkConnection = NetworkConnection.valueOf(sharedPref.getString(KEY_NETWORK_CONNECTION, NetworkConnection.FULL.name)!!)
         fun socks5DelegatePref(sharedPref: SharedPreferences) = sharedPref.getInt(KEY_SOCKS5_DELEGATE, DEFAULT_SOCKS5_DELEGATED)
@@ -232,5 +249,16 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         fun shareTimePref(sharedPref: SharedPreferences) = sharedPref.getBoolean(KEY_SHARE_TIME, true)
 
         fun autoBootPref(sharedPref: SharedPreferences) = sharedPref.getBoolean(KEY_AUTO_BOOT, false)
+
+        /**
+         * The `auto_boot_vm_id` pref, falling back to the first registry entry
+         * when unset/stale, then to the legacy VM id (multi-VM plan Phase 4).
+         */
+        fun autoBootVmIdPref(sharedPref: SharedPreferences, context: Context): String {
+            val stored = sharedPref.getString(KEY_AUTO_BOOT_VM_ID, null)
+            val entries = VmRegistry.list(context)
+            if (stored != null && entries.any { it.id == stored }) return stored
+            return entries.firstOrNull()?.id ?: VmRegistry.LEGACY_VM_ID
+        }
     }
 }

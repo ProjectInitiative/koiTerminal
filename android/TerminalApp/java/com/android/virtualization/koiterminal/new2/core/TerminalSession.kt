@@ -22,4 +22,13 @@ enum class TerminalSessionType {
     SERIAL,
 }
 
-data class TerminalSession(val id: String = UUID.randomUUID().toString(), val type: TerminalSessionType = TerminalSessionType.TTYD)
+/**
+ * One terminal tab. [vmId] is the VM the session belongs to; it is resolved
+ * via [VmManager.defaultVmId] when not given explicitly (multi-VM plan
+ * Phase D: per-VM terminal tabs).
+ */
+data class TerminalSession(
+    val id: String = UUID.randomUUID().toString(),
+    val type: TerminalSessionType = TerminalSessionType.TTYD,
+    val vmId: String = VmRegistry.LEGACY_VM_ID,
+)

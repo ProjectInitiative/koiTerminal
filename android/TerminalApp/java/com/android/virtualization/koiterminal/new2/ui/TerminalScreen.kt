@@ -131,7 +131,11 @@ fun TerminalTabBar(
     onTabClosed: (String) -> Unit,
     onAddTab: () -> Unit,
     onAddSerialTab: () -> Unit,
+    vmNames: Map<String, String> = emptyMap(),
 ) {
+    // When tabs from several VMs are open, prefix each title with its VM name
+    // (multi-VM plan Phase 4: tab bar groups/prefixes by VM name).
+    val showVmPrefix = tabs.map { it.vmId }.distinct().size > 1
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier =
@@ -171,6 +175,8 @@ fun TerminalTabBar(
                         onTabSelected = { onTabSelected(tab.id) },
                         onTabClosed = { onTabClosed(tab.id) },
                         tabViewModel = tabViewModel,
+                        titlePrefix =
+                            if (showVmPrefix) (vmNames[tab.vmId] ?: tab.vmId) + ": " else null,
                     )
                     if (index == tabs.lastIndex) {
                         Row(modifier = Modifier.padding(horizontal = 6.dp)) {
@@ -212,6 +218,7 @@ private fun TerminalTab(
     onTabSelected: () -> Unit,
     onTabClosed: () -> Unit,
     tabViewModel: TerminalViewModel,
+    titlePrefix: String? = null,
 ) {
     var showCloseDialog by remember { mutableStateOf(false) }
     val title by tabViewModel.title.collectAsStateWithLifecycle()
@@ -268,7 +275,7 @@ private fun TerminalTab(
                     .padding(horizontal = 8.dp, vertical = 12.dp),
         ) {
             Text(
-                text = title,
+                text = titlePrefix.orEmpty() + title,
                 maxLines = 1,
                 modifier =
                     Modifier.weight(1f)

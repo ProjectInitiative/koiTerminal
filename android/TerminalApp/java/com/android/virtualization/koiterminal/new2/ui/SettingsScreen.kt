@@ -325,7 +325,7 @@ fun SettingsDetailPane(
                 SettingsDestination.PortControl -> PortControlPage()
                 SettingsDestination.Network -> NetworkPage(onCloseSettings)
                 SettingsDestination.Advanced -> AdvancedPage(onCloseSettings)
-                SettingsDestination.VMConfig -> VmConfigEditorPage(onCloseSettings)
+                SettingsDestination.VMConfig -> VmConfigEditorPage(vmId = null, onCloseSettings = onCloseSettings)
                 SettingsDestination.Recovery -> RecoveryPage()
             }
         }

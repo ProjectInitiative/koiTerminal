@@ -33,17 +33,21 @@ import com.android.virtualization.koiterminal.new2.core.TerminalSession
 import com.android.virtualization.koiterminal.new2.core.TerminalSessionType
 import com.android.virtualization.koiterminal.new2.core.TerminalSessionRepository
 import com.android.virtualization.koiterminal.new2.core.VmController
+import com.android.virtualization.koiterminal.new2.core.VmManager
+import com.android.virtualization.koiterminal.new2.core.VmRegistry
 import com.android.virtualization.koiterminal.new2.ui.main.SettingsViewModel
 import com.android.virtualization.koiterminal.new2.core.VmState
 import com.android.virtualization.koiterminal.new2.ui.MainActivity
 import com.android.virtualization.koiterminal.new2.ui.PERMISSIONS
 import com.android.virtualization.koiterminal.new2.ui.SettingsDestination
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -204,8 +208,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _displayState.value = DisplayState.Hidden
     }
 
+    /**
+     * UI state of the active VM. Follows [VmManager.activeVmId] so that
+     * starting/stopping any registered VM (not just the one bound at init)
+     * is reflected here (multi-VM plan Phase D).
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
     val uiState: StateFlow<MainUiState> =
-        VmController.vmState
+        VmManager.activeVmId
+            .flatMapLatest { activeId ->
+                VmManager.state(activeId ?: VmRegistry.LEGACY_VM_ID)
+            }
             .map { vmState ->
                 when (vmState) {
                     is VmState.Ready -> {
@@ -241,11 +254,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 initialValue = MainUiState.Ready,
             )
 
-    fun startVm() {
+    /** Starts the given VM, or the active/default VM when [vmId] is null. */
+    fun startVm(vmId: String? = null) {
         if (!hasMandatoryPermissions.value) {
             return
         }
-        viewModelScope.launch { VmController.start() }
+        viewModelScope.launch {
+            if (vmId != null) VmManager.start(vmId) else VmController.start()
+        }
     }
 
     private fun isAutoBootEnabled(): Boolean {
@@ -253,6 +269,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return context
             .getSharedPreferences(SettingsViewModel.PREFS_NAME, Context.MODE_PRIVATE)
             .getBoolean(SettingsViewModel.KEY_AUTO_BOOT, false)
+    }
+
+    /**
+     * The VM auto-boot should start: the `auto_boot_vm_id` pref when it is a
+     * registered VM, else the first registry entry, else the legacy id
+     * (multi-VM plan Phase 4).
+     */
+    private fun autoBootVmId(): String {
+        val context = getApplication<Application>()
+        val prefs =
+            context.getSharedPreferences(SettingsViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        return SettingsViewModel.autoBootVmIdPref(prefs, context)
     }
 
     fun onPermissionGranted() {
@@ -265,9 +293,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _permissionRequired.value = false
     }
 
-    fun stopVm() {
+    /** Stops the given VM, or the active/default VM when [vmId] is null. */
+    fun stopVm(vmId: String? = null) {
         Log.i("MainViewModel", "MainViewModel.stopVm()")
-        VmController.stop()
+        if (vmId != null) VmManager.stop(vmId) else VmController.stop()
     }
 
     /**
@@ -354,17 +383,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             hasMandatoryPermissions.collectLatest { hasMandatory ->
                 if (hasMandatory) {
                     launch {
-                        Installer.installState.collectLatest { installState ->
-                            if (installState is InstallState.Installed) {
+                        combine(
+                            Installer.installState,
+                            Installer.vmInstallStates,
+                        ) { legacyState, perVmStates ->
+                            // Arm auto-boot when the legacy install is present or any
+                            // per-VM (imported) install is complete.
+                            legacyState is InstallState.Installed ||
+                                perVmStates.values.any { it is InstallState.Installed }
+                        }.collectLatest { installed ->
+                            if (installed) {
                                 // Reset sessions to start fresh upon installation completion.
                                 TerminalSessionRepository.reset()
 
                                 // Once installed, start observing UI state and trigger VM startup
                                 // whenever it returns to a Ready state (only if auto-boot is
-                                // enabled in Settings; otherwise the user presses Start).
+                                // enabled in Settings; otherwise the user presses Start). The VM
+                                // to boot is `auto_boot_vm_id` (default: first registry entry).
                                 uiState.collect { state ->
                                     if (state is MainUiState.Ready && isAutoBootEnabled()) {
-                                        startVm()
+                                        startVm(autoBootVmId())
                                     }
                                 }
                             } else {
@@ -377,8 +415,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
 
                     launch { VmController.sessionDiscarded.collect { id -> closeTab(id) } }
+                    // Reboot auto-restart and serial-tab handling for whichever VM is active.
+                    @OptIn(ExperimentalCoroutinesApi::class)
                     launch {
-                        VmController.vmState.collect { state ->
+                        VmManager.activeVmId
+                            .flatMapLatest { activeId ->
+                                VmManager.state(activeId ?: VmRegistry.LEGACY_VM_ID)
+                            }
+                            .collect { state ->
                             if (state is VmState.Rebooting) {
                                 restartVm()
                                 // A guest-initiated reboot should bring the VM back up
@@ -390,6 +434,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 if (addSerialTab()) {
                                     closeTab(currentTabId)
                                 }
+                            }
                             }
                         }
                     }
@@ -405,4 +450,3 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-}

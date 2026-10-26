@@ -159,7 +159,20 @@ object VmManager {
     /** The instance the legacy [VmController] facade delegates to. */
     fun activeInstance(): VmInstance = instance(_activeVmId.value ?: VmRegistry.LEGACY_VM_ID)
 
+    /**
+     * Default VM id for new terminal sessions and auto-boot: the active VM,
+     * else the first registry entry, else the legacy id. Callers may pass an
+     * explicit id instead.
+     */
+    fun defaultVmId(): String =
+        _activeVmId.value
+            ?: runCatching { VmRegistry.list(appContext).firstOrNull()?.id }.getOrNull()
+            ?: VmRegistry.LEGACY_VM_ID
+
     /** True when any VM other than [vmId] is alive (Starting/Running/Stopping/Rebooting). */
     fun isAnotherVmAlive(vmId: String): Boolean =
         states.value.any { (id, state) -> id != vmId && state.isAlive }
+
+    /** True when any VM is alive. */
+    fun isAnyVmAlive(): Boolean = states.value.any { it.value.isAlive }
 }

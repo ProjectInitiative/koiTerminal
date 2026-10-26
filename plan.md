@@ -7,7 +7,7 @@ Full architecture + contracts: **docs/MULTI_VM_PLAN.md** (read it first).
 - [x] Phase A — registry + storage (`VmRegistry`, `InstalledImage` param, legacy migration)
 - [x] Phase B — VmManager (`VmInstance`, per-vmId state flows, VmService scoping)
 - [x] Phase C — import & installer (SAF import dialog, `ImageArchive.fromPath`, install queue)
-- [ ] Phase D — UI (VM list idle screen, per-VM tabs, per-VM config editor)
+- [x] Phase D — UI (VM list idle screen, per-VM tabs, per-VM config editor)
 - [ ] Phase E — settings split (per-VM JSON prefs, global trim)
 
 Rules: implement only your assigned phase; the build gate

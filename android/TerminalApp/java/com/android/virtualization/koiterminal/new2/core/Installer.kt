@@ -292,6 +292,12 @@ object Installer {
         vmInstallJobs[vmId]?.cancel()
     }
 
+    /** Clears the per-VM install state (e.g. after the VM was uninstalled). */
+    fun clearVmInstallState(vmId: String) {
+        _vmInstallStates.value = _vmInstallStates.value - vmId
+        perVmInstallStateFlows.remove(vmId)
+    }
+
     private fun ensureVmInstallWorker() {
         if (vmInstallWorkerStarted) return
         synchronized(this) {

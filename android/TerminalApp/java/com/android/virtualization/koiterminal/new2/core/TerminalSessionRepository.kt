@@ -40,12 +40,12 @@ object TerminalSessionRepository {
     }
 
     /** Adds a new terminal session and selects it. Returns false if skipped. */
-    fun addSession(type: TerminalSessionType = TerminalSessionType.TTYD): Boolean {
+    fun addSession(type: TerminalSessionType = TerminalSessionType.TTYD, vmId: String? = null): Boolean {
         if (type == TerminalSessionType.SERIAL && _sessions.value.any { it.type == TerminalSessionType.SERIAL }) {
             // only one SERIAL session at a time
             return false
         }
-        val newSession = TerminalSession(type = type)
+        val newSession = TerminalSession(type = type, vmId = vmId ?: VmManager.defaultVmId())
         val currentList = _sessions.value.toMutableList()
         currentList.add(newSession)
         _sessions.value = currentList
@@ -86,12 +86,27 @@ object TerminalSessionRepository {
         }
     }
 
-    /** Resets the sessions to a single new session. */
-    fun reset() {
+    /** Resets the sessions to a single new session (bound to [vmId] or the default VM). */
+    fun reset(vmId: String? = null) {
         // Log.d("TerminalSessionRepository", "reset() call stack: ${Log.getStackTraceString(Throwable())}")
-        val newSession = TerminalSession()
+        val newSession = TerminalSession(vmId = vmId ?: VmManager.defaultVmId())
         _sessions.value = listOf(newSession)
         _selectedSessionId.value = newSession.id
         _selectedSessionIndex.value = 0
+    }
+
+    /** Removes all sessions bound to the given VM (e.g. on uninstall). */
+    fun removeSessionsForVm(vmId: String) {
+        val remaining = _sessions.value.filter { it.vmId != vmId }
+        if (remaining.isEmpty()) {
+            reset()
+            return
+        }
+        _sessions.value = remaining
+        val keptId =
+            _selectedSessionId.value.takeIf { selected -> remaining.any { it.id == selected } }
+                ?: remaining.first().id
+        _selectedSessionId.value = keptId
+        _selectedSessionIndex.value = remaining.indexOfFirst { it.id == keptId }
     }
 }
